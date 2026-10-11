@@ -213,8 +213,12 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
           )}
         </div>
         <div className="topbar-right">
-          <button className={`btn ghost small${speed === 'fast' ? ' on' : ''}`} onClick={() => setSpeed(speed === 'fast' ? 'normal' : 'fast')} title="Speed of computer turns">
-            AI speed: {speed === 'fast' ? 'Fast' : 'Normal'}
+          <button
+            className={`btn ghost small${speed !== 'normal' ? ' on' : ''}`}
+            onClick={() => setSpeed(speed === 'normal' ? 'fast' : speed === 'fast' ? 'turbo' : 'normal')}
+            title="Speed of computer turns (Normal → Fast → Turbo)"
+          >
+            AI speed: {speed === 'normal' ? 'Normal' : speed === 'fast' ? 'Fast' : 'Turbo'}
           </button>
           <button className="btn ghost small" onClick={() => setRulesOpen(true)}>
             How to play

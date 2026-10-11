@@ -66,8 +66,13 @@ function meetsCriteria(s: GameState): boolean {
 
 let cached: GameState | null = null;
 
+/** Cached: the scenario is deterministic, and states are immutable. */
 export function createDemoGame(): GameState {
-  if (cached) return cached;
+  if (!cached) cached = buildDemoGame();
+  return cached;
+}
+
+export function buildDemoGame(): GameState {
   for (let i = 0; i < 60; i++) {
     const seed = i === 0 ? DEMO_SEED : deriveSeed(DEMO_SEED, i);
     const sim = simulateToHumanTurn(seed);
@@ -83,7 +88,6 @@ export function createDemoGame(): GameState {
       null,
       `Quick Demo: a midgame market reached through real engine play (seed ${seed}). You are Parallax Labs, holding ${sumBundle(DEMO_HAND)} resources. Build a cluster now — or trade for a GPU and open an AI Factory.`,
     );
-    cached = s;
     return s;
   }
   throw new Error('No demo scenario satisfied the criteria');

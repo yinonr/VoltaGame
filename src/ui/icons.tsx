@@ -79,7 +79,7 @@ export function OutageGlyph({ size = 24 }: { size?: number }) {
   );
 }
 
-export function DieFace({ value, rolling }: { value: number; rolling?: boolean }) {
+export function DieFace({ value, rolling, idle }: { value: number; rolling?: boolean; idle?: boolean }) {
   const spots: Record<number, [number, number][]> = {
     1: [[12, 12]],
     2: [[7, 7], [17, 17]],
@@ -89,7 +89,7 @@ export function DieFace({ value, rolling }: { value: number; rolling?: boolean }
     6: [[7, 6.5], [17, 6.5], [7, 12], [17, 12], [7, 17.5], [17, 17.5]],
   };
   return (
-    <svg className={`die${rolling ? ' rolling' : ''}`} width="44" height="44" viewBox="0 0 24 24" aria-label={`Die showing ${value}`}>
+    <svg className={`die${rolling ? ' rolling' : ''}${idle ? ' idle' : ''}`} width="44" height="44" viewBox="0 0 24 24" aria-label={idle ? 'Die not rolled yet' : `Die showing ${value}`}>
       <rect x="1" y="1" width="22" height="22" rx="5" className="die-body" />
       {(spots[value] ?? []).map(([x, y], i) => (
         <circle key={i} cx={x} cy={y} r="2.1" className="die-spot" />

@@ -6,7 +6,7 @@ import type { Action, GameState } from '../engine/types';
 
 const SAVE_KEY = 'settlers-of-compute:save:v1';
 
-export type Speed = 'normal' | 'fast';
+export type Speed = 'normal' | 'fast' | 'turbo';
 
 export interface Toast {
   id: number;
@@ -113,7 +113,7 @@ export function useGame() {
       action = fallbackAction(state, actor);
     }
     const base = DELAYS[action.type] ?? 700;
-    const delay = speed === 'fast' ? Math.round(base * 0.3) : base;
+    const delay = speed === 'turbo' ? 25 : speed === 'fast' ? Math.round(base * 0.3) : base;
     const timer = window.setTimeout(() => {
       const cur = stateRef.current;
       if (cur !== state) return; // state changed underneath us; effect will re-run

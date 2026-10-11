@@ -123,8 +123,8 @@ export function DiceDisplay({ state }: { state: GameState }) {
   }, [key]);
   return (
     <div className={`dice${roll?.total === 7 ? ' seven' : ''}`}>
-      <DieFace value={roll?.d1 ?? 1} rolling={rolling} />
-      <DieFace value={roll?.d2 ?? 1} rolling={rolling} />
+      <DieFace value={roll?.d1 ?? 6} rolling={rolling} idle={!roll} />
+      <DieFace value={roll?.d2 ?? 6} rolling={rolling} idle={!roll} />
       <div className="dice-total">{roll ? <b className={rolling ? 'pop' : ''}>{roll.total}</b> : <span className="muted">—</span>}</div>
     </div>
   );

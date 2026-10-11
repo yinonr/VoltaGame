@@ -948,6 +948,9 @@ kbd {
 .dice.seven .die-spot {
   fill: #991b1b;
 }
+.die.idle {
+  opacity: 0.28;
+}
 .die.rolling {
   animation: roll 0.55s ease-out;
 }
