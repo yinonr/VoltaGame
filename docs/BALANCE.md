@@ -110,6 +110,36 @@ Source: `docs/FULLSTACK_CALIBRATION.md` (seeds 7000–7199), rerun with the fina
 | Can innovation-focused companies still win? | **Yes.** Helixa (the card-focused rival) wins 33% (36% in Classic). Companies buying 3–4 cards win 41%. Cards are bought less often overall (3.9 against 7.4 per game), because GPUs go to factories. |
 | Does either mechanic create runaway leaders? | **No sign of it.** Runner-up CP (7.6) and the close-game rate (62.5%) match Classic. |
 
+## Grid Stability (final sprint)
+
+Grid Stability is part of the Compute rules: after a disruption the next 6 rolls are protected, and an outage lasts 4 rolls. 300 games per row per seed block (blocks 30000 and 12000; 600 games per row in total). Reproduce with `GRID_BALANCE=/tmp/grid.md N=300 S0=30000 npx vitest run grid-balance`.
+
+| Per game (mean of both blocks) | Classic | Compute, no Grid Stability | **Compute + Grid Stability** |
+| --- | --- | --- | --- |
+| Game length, rounds | 18.1 | 16.6 | **15.0** |
+| Natural disruptions | 11.7 | 10.8 | **4.9** (−55%) |
+| 7s absorbed by the stabilizing grid | — | — | 4.8 |
+| Infrastructure Priority plays | 3.1 | 1.6 | 1.1 |
+| Rolls with a hex offline | 91% | 91% | **35%** |
+| Average outage length (rolls) | persistent | persistent | 3.4 (rule: 4; Priority and new disruptions can end one early) |
+| Discards | 6.5 | 5.5 | **3.5** |
+| Thefts | 14.5 | 12.3 | **5.9** |
+| Financed upgrades / refinances | — | 7.2 / 2.8 | 7.1 / 2.5 |
+| Rounds to repay a commitment | — | 4.4 | 4.1 |
+| Full-Stack unlock rate / Integrated Deployments | — | 81% / 0.38 | 80% / 0.38 |
+| Win share P / H / A / S (%) | 28 / 34 / 22 / 17 | 31 / 31 / 22 / 17 | 33 / 29 / 21 / 18 |
+| Stalls | 0 | 0 | 0 |
+
+**Debt-free probe under Grid Stability:** 23.5% (141/600; fair 25%), against 22.6% without it. Financing did **not** get stronger, so no economy change was made.
+
+**Reading:**
+
+- **Interruptions are halved.** Natural disruptions drop 55%, discards 35% and thefts 52%.
+- **Outages are now temporary.** A hex is offline on 35% of rolls, down from about 90%, and every outage is visibly temporary.
+- **7s still matter.** About 5 real disruptions per game remain, and Infrastructure Priority still moves the outage at will.
+- **Games are about 1.5 rounds shorter.** That is the main side effect: production flows more freely.
+- **Win shares** move within noise. Helixa (cards) dips slightly as Priority plays fall.
+
 ## Caveats and follow-ups
 
 - **Card economy.** Financing roughly halves Innovation Card purchases and Priority Access (29.5% → 9%). That is a real shift in the card economy. Watch it in human playtests.

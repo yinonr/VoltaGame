@@ -95,6 +95,34 @@ The engine checks every company after every action (`updateFullStack`), so an un
 - **Build menu:** an "Integrated Deployment" row explains what's missing (for example "Unlock Full-Stack Integration first (2/4 milestones).").
 - **Scoreboard:** a "Full-Stack" badge.
 
+## Grid Stability
+
+Part of the Compute rules (`rules.gridStability`); Classic keeps every-7 disruptions and persistent outages.
+
+**Rules:**
+
+- **Stabilization:** after a Grid Disruption, the next **6 player dice rolls** are protected. A natural 7 in that window causes no discards, no theft and no outage move, and still produces nothing. Every roll counts, absorbed 7s included, and an absorbed 7 does not restart the window. The 7th roll can disrupt again.
+- **Outages:** an outage blocks its hex for the next **4 rolls**; the roll that caused it doesn't count. It expires after the 4th roll resolves: the marker returns to the Dead Zone, the log says "Grid restored", and the hex produces from the 5th roll. 7s count down too. There is only ever one outage, because there is one marker.
+- **Infrastructure Priority** bypasses stabilization, replaces the current outage, and restarts both timers. It works with no outage active and cannot stack outages.
+- **Financing:** a blocked hex repays nothing. Repayment resumes after expiry, and the factory's other unblocked hexes keep repaying.
+
+**State:** `GameState.grid = { stableRolls, outageRolls }` (`src/engine/grid.ts`), plus `lastRoll.stabilized` for an absorbed 7. All plain numbers, no RNG. The timers count down at the end of each ROLL; MOVE_DISRUPTION sets them to 6 and 4.
+
+**Saves:**
+
+- A save taken mid-countdown resumes exactly (tested).
+- A Compute save from before Grid Stability (its `rules` has no `gridStability` key) keeps the persistent-outage, every-7 rules it started with. Rules are never switched mid-game.
+- A state with the rule on but no timers starts vulnerable, and an existing outage gets a full 4-roll countdown.
+
+**UI:**
+
+- **Grid status chips:** "Grid vulnerable" or "Stabilizing · N rolls", plus "Outage · N rolls". They sit in the desktop turn panel and over the phone board's top-right corner.
+- **Absorbed 7:** reads "Grid stable · no disruption", in cyan rather than red.
+- **Board:** the outage label counts down ("OUTAGE · 2").
+- **Expiry:** a quiet "Grid restored" ticker notice. There are no dialogs and nothing to acknowledge.
+
+**Balance:** natural disruptions −55%, discards −35%, thefts −52%, a hex offline on 35% of rolls instead of about 90%, games about 1.5 rounds shorter, Financing unchanged (`docs/BALANCE.md`).
+
 ## Interactions
 
 - **Integrated Deployment vs. Financing:** both draw on the same 4 factory pieces and on GPUs. The AI never lets two goals claim the same GPUs.

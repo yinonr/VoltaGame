@@ -160,3 +160,20 @@ Supabase is the fallback, and it is free to start:
 - Realtime broadcasts public state changes.
 
 It is more configuration (database schema, RLS policies, anonymous auth) but keeps the same authoritative-server design. A client-only shared-database approach is acceptable **only** for a "trusted friends" mode, because hands and dice would be inspectable.
+
+## State added since this plan (must be synchronized)
+
+These are all plain JSON in `GameState`, already deterministic and already covered by the save and JSON round-trip tests. Any `viewFor(state, seat)` redaction must keep them public.
+
+| Field | What it is |
+| --- | --- |
+| `rules` | `{ financing, fullStack, marketEvents, gridStability? }`: the game's rules variant. Fixed at creation; never changes mid-game. |
+| `grid` | `{ stableRolls, outageRolls }`: the Grid Stability timers (Compute rules). |
+| `lastRoll.stabilized` | A 7 absorbed by the stabilizing grid; the UI shows it differently. |
+| `Building.financed` | Committed units still owed by a financed AI Factory. |
+| `Player.fullStackTurn` | When Full-Stack Integration was unlocked. |
+| `Player.name` | Sanitized custom company name. The server should re-sanitize names from clients with `sanitizeCompanyName`, and keep them unique. |
+| `lastProduction.deliveries` | Financing repayments on the last roll (UI feedback). |
+
+Hidden information is unchanged: the server must still redact other players' hands and Innovation Cards (including AI Breakthroughs) and the deck order. None of the new fields are secret.
+
