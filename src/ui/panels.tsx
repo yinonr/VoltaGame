@@ -21,9 +21,10 @@ import { getActingPlayer } from '../engine/game';
 import { checkBuild, checkPlayCard, piecesLeft } from '../engine/rules';
 import type { Check } from '../engine/rules';
 import { longestNetwork, scoreBreakdown } from '../engine/scoring';
-import type { DevCardType, GameState, LogEntry, ResourceBundle } from '../engine/types';
+import type { DevCardType, DiceRoll, GameState, LogEntry, ResourceBundle } from '../engine/types';
 import { RESOURCES } from '../engine/types';
 import { ClusterShape, FactoryShape } from './Board';
+import { GainRibbon, prefersReducedMotion, useGainFlash } from './feedback';
 import { DieFace, ResourceChip, ResourceIcon } from './icons';
 
 function PieceGlyph({ kind, color, stroke }: { kind: 'cluster' | 'factory'; color: string; stroke: string }) {
@@ -139,24 +140,65 @@ export function EventLog({ state }: { state: GameState }) {
 // Dice + turn
 // ---------------------------------------------------------------------------
 
+/** How long the dice tumble before they settle (the board lights up as they land). */
+const TUMBLE_MS = 640;
+const TUMBLE_STEP_MS = 80;
+
 export function DiceDisplay({ state }: { state: GameState }) {
-  const roll = state.lastRoll;
-  const [rolling, setRolling] = useState(false);
-  const lastKey = useRef<string>('');
-  const key = roll ? `${state.turn}-${roll.d1}-${roll.d2}` : '';
+  // The last roll stays on the table (dimmed) after the turn ends, until the next roll.
+  const [shown, setShown] = useState<{ roll: DiceRoll; seq: number } | null>(() => (state.lastRoll ? { roll: state.lastRoll, seq: 0 } : null));
+  const [tumble, setTumble] = useState(0); // > 0 while tumbling: the face-shuffle step
+  const seen = useRef<DiceRoll | null>(state.lastRoll);
+  const seq = useRef(0);
+  const live = state.lastRoll;
   useEffect(() => {
-    if (key && key !== lastKey.current) {
-      lastKey.current = key;
-      setRolling(true);
-      const t = window.setTimeout(() => setRolling(false), 550);
-      return () => window.clearTimeout(t);
-    }
-  }, [key]);
+    if (!live || live === seen.current) return;
+    seen.current = live;
+    const id = ++seq.current;
+    setShown({ roll: live, seq: id });
+    if (prefersReducedMotion()) return;
+    // Shuffle the faces while the dice tumble, then settle on the real roll. UI-only timers.
+    let step = 1;
+    setTumble(step);
+    const timer = window.setInterval(() => {
+      step++;
+      if (step * TUMBLE_STEP_MS >= TUMBLE_MS || seq.current !== id) {
+        window.clearInterval(timer);
+        if (seq.current === id) setTumble(0);
+        return;
+      }
+      setTumble(step);
+    }, TUMBLE_STEP_MS);
+  }, [live]);
+  const roll = shown?.roll ?? null;
+  const rolling = tumble > 0;
+  const stale = !!roll && live === null;
+  const seven = roll?.total === 7;
+  const fresh = !!shown && shown.seq > 0 && !stale;
+  const face = (d: number, k: number) => (rolling ? ((d + tumble * k) % 6) + 1 : d);
   return (
-    <div className={`dice${roll?.total === 7 ? ' seven' : ''}`}>
-      <DieFace value={roll?.d1 ?? 6} rolling={rolling} idle={!roll} />
-      <DieFace value={roll?.d2 ?? 6} rolling={rolling} idle={!roll} />
-      <div className="dice-total">{roll ? <b className={rolling ? 'pop' : ''}>{roll.total}</b> : <span className="muted">—</span>}</div>
+    <div
+      className={`dice${seven ? ' seven' : ''}${rolling ? ' tumbling' : ''}${stale ? ' stale' : ''}${fresh && !rolling ? ' landed' : ''}`}
+      title={stale ? `Last roll: ${roll!.total}` : undefined}
+      aria-label={roll ? `${stale ? 'Last roll' : 'Rolled'} ${roll.total} (${roll.d1} + ${roll.d2})${seven ? ': Grid Disruption' : ''}` : 'Dice not rolled yet'}
+      role="img"
+    >
+      <DieFace value={roll ? face(roll.d1, 5) : 6} rolling={rolling} idle={!roll} />
+      <DieFace value={roll ? face(roll.d2, 3) : 6} rolling={rolling} idle={!roll} />
+      <div className="dice-total">
+        {roll ? (
+          <b key={`${shown!.seq}-${rolling}`} className={rolling ? 'pending' : fresh ? 'pop' : ''}>
+            {rolling ? '·' : roll.total}
+          </b>
+        ) : (
+          <span className="muted">—</span>
+        )}
+      </div>
+      {seven && !rolling && !stale && (
+        <span key={shown!.seq} className="dice-alert">
+          Grid Disruption
+        </span>
+      )}
     </div>
   );
 }
@@ -182,20 +224,36 @@ export function FlashCount({ value }: { value: number }) {
 export function HandPanel({ state, player }: { state: GameState; player: number }) {
   const p = state.players[player];
   const total = sumBundle(p.resources);
+  // What the latest roll (anyone's) paid this company: a ribbon plus a "+N" on each card.
+  const gain = useGainFlash(state, player);
   return (
     <section className="panel hand" aria-label="Your resources">
       <header className="panel-head">
         <h2>Resources</h2>
         <span className={`muted small${total > 7 ? ' warn' : ''}`}>{total} in hand{total > 7 ? ' · over limit on a 7' : ''}</span>
+        <GainRibbon gain={gain} />
       </header>
       <div className="hand-grid">
-        {RESOURCES.map((r) => (
-          <div key={r} className={`hand-card${p.resources[r] === 0 ? ' empty' : ''}`} style={{ ['--res' as string]: RESOURCE_INFO[r].color }} title={RESOURCE_INFO[r].blurb}>
-            <ResourceIcon type={r} size={26} />
-            <FlashCount value={p.resources[r]} />
-            <span className="hand-label">{RESOURCE_INFO[r].label}</span>
-          </div>
-        ))}
+        {RESOURCES.map((r) => {
+          const got = gain?.gains[r] ?? 0;
+          return (
+            <div
+              key={r}
+              className={`hand-card${p.resources[r] === 0 ? ' empty' : ''}`}
+              style={{ ['--res' as string]: RESOURCE_INFO[r].color }}
+              title={RESOURCE_INFO[r].blurb}
+            >
+              {got > 0 && (
+                <span key={gain!.seq} className="hand-gain" aria-hidden="true">
+                  +{got}
+                </span>
+              )}
+              <ResourceIcon type={r} size={26} />
+              <FlashCount value={p.resources[r]} />
+              <span className="hand-label">{RESOURCE_INFO[r].label}</span>
+            </div>
+          );
+        })}
       </div>
       <div className="supply muted small" title="Market supply left for each resource">
         Market supply:{' '}

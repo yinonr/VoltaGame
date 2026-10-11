@@ -1,1 +1,351 @@
 /* polish.css — owned by the polish work stream. Loaded after styles.css. */
+
+/* ---------------------------------------------------------------------------
+   Roll feedback: producing hexes light up, tokens pulse, blocked hex flashes,
+   a 7 washes the board plate red.
+   --------------------------------------------------------------------------- */
+.tile-lit-fill {
+  fill: var(--res);
+  fill-opacity: 0;
+  stroke: none;
+  animation: tileLit 3s ease-out 1 forwards;
+}
+@keyframes tileLit {
+  0% { fill-opacity: 0; }
+  12% { fill-opacity: 0.32; }
+  60% { fill-opacity: 0.16; }
+  100% { fill-opacity: 0; }
+}
+.token-pulse {
+  animation: tokenPulse 0.9s cubic-bezier(0.2, 1.5, 0.4, 1) 1;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+@keyframes tokenPulse {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.32); }
+  100% { transform: scale(1); }
+}
+.token-halo {
+  fill: none;
+  stroke: var(--res);
+  stroke-width: 3;
+  opacity: 0;
+  animation: tokenHalo 1.6s ease-out 1;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+@keyframes tokenHalo {
+  0% { opacity: 0.95; transform: scale(1); }
+  100% { opacity: 0; transform: scale(2.2); }
+}
+.tile-blocked {
+  animation: blockedFade 3s ease-out 1 forwards;
+}
+.tile-blocked-fill {
+  fill: rgba(248, 113, 113, 0.22);
+  stroke: #f87171;
+  stroke-width: 3;
+}
+.tile-blocked-pill {
+  fill: #2a0b10;
+  stroke: #f87171;
+  stroke-width: 1.5;
+}
+.tile-blocked-text {
+  fill: #fecaca;
+  font: 800 10px var(--display);
+  letter-spacing: 0.16em;
+}
+@keyframes blockedFade {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.plate-seven {
+  fill: rgba(248, 113, 113, 0.18);
+  stroke: #f87171;
+  stroke-width: 3;
+  opacity: 0;
+  animation: plateSeven 1.8s ease-out 1;
+}
+@keyframes plateSeven {
+  0% { opacity: 0; }
+  15% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ---------------------------------------------------------------------------
+   Payout chips: the viewer's own are bigger and ringed in their company color.
+   --------------------------------------------------------------------------- */
+.payout.mine {
+  transform: scale(1.12);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.payout-ring {
+  fill: none;
+  stroke: var(--co);
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 6px var(--co));
+}
+.payout.short {
+  opacity: 0.8;
+}
+
+/* ---------------------------------------------------------------------------
+   Build pulses: rings + "+N CP" over a piece that just appeared; a glow along a new road.
+   --------------------------------------------------------------------------- */
+.build-ring {
+  fill: none;
+  stroke: var(--co);
+  stroke-width: 3;
+  opacity: 0;
+  animation: buildRing 1.3s ease-out 1;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.build-ring.late {
+  animation-delay: 0.25s;
+}
+.build-pulse.mine .build-ring {
+  stroke-width: 4;
+}
+@keyframes buildRing {
+  0% { opacity: 0.95; transform: scale(0.6); }
+  100% { opacity: 0; transform: scale(2.8); }
+}
+.build-cp {
+  animation: buildCp 1.8s ease-out 1 forwards;
+}
+.build-cp rect {
+  fill: #0b1020;
+  stroke: var(--co);
+  stroke-width: 1.5;
+}
+.build-cp text {
+  fill: var(--co);
+  font: 800 11px var(--display);
+}
+@keyframes buildCp {
+  0% { opacity: 0; translate: 0 8px; }
+  15% { opacity: 1; translate: 0 0; }
+  75% { opacity: 1; translate: 0 -6px; }
+  100% { opacity: 0; translate: 0 -12px; }
+}
+.road-pulse {
+  stroke-width: 14;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  opacity: 0.85;
+  fill: none;
+  animation: roadPulse 1.4s ease-out 1 forwards;
+}
+@keyframes roadPulse {
+  0% { stroke-dashoffset: 1; opacity: 0.9; }
+  45% { stroke-dashoffset: 0; opacity: 0.8; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+/* ---------------------------------------------------------------------------
+   Dice: tumble, settle, and a 7 that reads as a Grid Disruption.
+   --------------------------------------------------------------------------- */
+.dice {
+  position: relative;
+  flex-wrap: wrap;
+}
+.dice.tumbling .die {
+  animation: dieShake 0.16s ease-in-out infinite alternate;
+}
+@keyframes dieShake {
+  from { transform: rotate(-12deg) translateY(-2px); }
+  to { transform: rotate(10deg) translateY(1px); }
+}
+.dice.landed .die {
+  animation: dieLand 0.35s cubic-bezier(0.2, 1.6, 0.4, 1) 1;
+}
+@keyframes dieLand {
+  0% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+.dice.stale {
+  opacity: 0.55;
+}
+.dice-total .pending {
+  color: var(--muted);
+}
+.dice-alert {
+  flex-basis: 100%;
+  font: 800 11px var(--display);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--danger);
+  animation: diceAlert 1.6s ease-out 1;
+}
+@keyframes diceAlert {
+  0% { opacity: 0; transform: scale(0.9); }
+  20% { opacity: 1; transform: scale(1.06); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* ---------------------------------------------------------------------------
+   Gains: a ribbon by the desktop hand, "+N" on each card, bubbles over the phone hand bar.
+   --------------------------------------------------------------------------- */
+.gain-ribbon {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+  font: 700 12px var(--display);
+  animation: gainRibbon 3s ease-out 1 forwards;
+}
+.gain-ribbon span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--res);
+  background: color-mix(in srgb, var(--res) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--res) 45%, transparent);
+}
+@keyframes gainRibbon {
+  0% { opacity: 0; transform: translateY(6px); }
+  10% { opacity: 1; transform: translateY(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.hand-card {
+  position: relative;
+}
+.hand-gain {
+  position: absolute;
+  top: -8px;
+  right: -4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font: 800 12px var(--display);
+  color: #0b1020;
+  background: var(--res);
+  box-shadow: 0 0 12px var(--res);
+  animation: handGain 3s ease-out 1 forwards;
+  pointer-events: none;
+}
+@keyframes handGain {
+  0% { opacity: 0; transform: translateY(6px) scale(0.6); }
+  12% { opacity: 1; transform: translateY(0) scale(1.15); }
+  25% { transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-6px); }
+}
+.m-hand {
+  position: relative;
+}
+.gain-bubbles {
+  position: absolute;
+  inset: 0 8px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  pointer-events: none;
+}
+.gain-bubbles span {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+.gain-bubbles span.on b {
+  margin-top: -10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font: 800 12px var(--display);
+  color: #0b1020;
+  background: var(--res);
+  box-shadow: 0 0 12px var(--res);
+  animation: handGain 3s ease-out 1 forwards;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Rival ticker: quiet, non-blocking notices in the board's top-left corner.
+   --------------------------------------------------------------------------- */
+.rival-feed {
+  position: absolute;
+  top: 64px;
+  left: 12px;
+  display: grid;
+  gap: 6px;
+  max-width: min(320px, calc(100% - 24px));
+  z-index: 20;
+  pointer-events: none;
+}
+.m-board .rival-feed {
+  top: 8px;
+  left: 8px;
+  max-width: calc(100% - 64px);
+}
+.rival-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  background: rgba(11, 16, 32, 0.92);
+  border: 1px solid color-mix(in srgb, var(--co, #94a3b8) 45%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  animation: noticeIn 3.8s ease-out 1 forwards;
+}
+.rival-notice b {
+  color: var(--co, var(--text));
+}
+.rival-notice.threat {
+  border-color: rgba(248, 113, 113, 0.7);
+  background: rgba(42, 11, 16, 0.94);
+}
+.rival-notice-mark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--co, #94a3b8);
+}
+@keyframes noticeIn {
+  0% { opacity: 0; transform: translateX(-10px); }
+  8% { opacity: 1; transform: translateX(0); }
+  85% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile-lit-fill,
+  .token-pulse,
+  .token-halo,
+  .tile-blocked,
+  .plate-seven,
+  .build-ring,
+  .build-cp,
+  .road-pulse,
+  .dice.tumbling .die,
+  .dice.landed .die,
+  .dice-alert,
+  .gain-ribbon,
+  .hand-gain,
+  .gain-bubbles span.on b,
+  .rival-notice {
+    animation: none;
+  }
+  .tile-lit-fill { fill-opacity: 0.18; }
+  .token-halo, .build-ring, .road-pulse, .plate-seven { display: none; }
+}

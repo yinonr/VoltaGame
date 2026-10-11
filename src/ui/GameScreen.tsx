@@ -32,6 +32,7 @@ import { BuildPanel, CardsPanel, CompanyDot, DiceDisplay, EventLog, FlashCount, 
 import type { BuildChoice } from './panels';
 import { FinancingPanel, FullStackPanel, sitePips } from './strategy';
 import { BottomSheet, COMPACT_QUERY, useMediaQuery, ZOOM_LEVELS, ZoomableBoard } from './mobile';
+import { FeedbackLayer, GainBubbles } from './feedback';
 import { ResourceIcon } from './icons';
 import { scoreBreakdown } from '../engine/scoring';
 import { RESOURCES } from '../engine/types';
@@ -293,6 +294,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
       tileMode={state.phase === 'moveDisruption' ? 'disrupt' : null}
       touch={compact}
       selected={pending}
+      viewer={viewer}
     />
   );
 
@@ -418,6 +420,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
               </div>
             </div>
           )}
+          <FeedbackLayer state={state} viewer={viewer} speed={speed} pushToast={pushToast} />
         </div>
 
         <div className="m-dock">
@@ -459,6 +462,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
                 <span>{RESOURCE_INFO[r].label}</span>
               </div>
             ))}
+            <GainBubbles state={state} player={viewerPlayer.id} />
           </div>
         )}
 
@@ -595,6 +599,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
           {instruction(state, viewer, mode)}
         </div>
         {boardEl}
+        <FeedbackLayer state={state} viewer={viewer} speed={speed} pushToast={pushToast} />
         <p className="disclaimer-inline">Unofficial, Catan-inspired creative prototype. Not affiliated with or endorsed by Volta or Catan rights holders.</p>
       </main>
 

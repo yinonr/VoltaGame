@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { GameState, TileType } from '../engine/types';
 import { BARREN_INFO, RESOURCE_INFO, companyById, pips } from '../engine/constants';
 import { isFinanced, outputMultiplier } from '../engine/financing';
+import { useFreshBuilds, useRollFlash } from './feedback';
 import { ResourceGlyph } from './icons';
 
 const S = 64; // pixels per unit hex radius
@@ -30,6 +31,8 @@ interface BoardProps {
   touch?: boolean;
   /** Spot selected (touch) and awaiting confirmation. */
   selected?: BoardTarget | null;
+  /** The player looking at the board: their payout chips stand out. */
+  viewer?: number | null;
 }
 
 function hexPoints(cx: number, cy: number, r: number): string {
@@ -71,7 +74,7 @@ export function FactoryShape({ x, y, color, stroke, scale = 1, ghost = false }: 
   );
 }
 
-export function Board({ state, highlightVertices, highlightEdges, highlightTiles, ghost, ghostColor, onVertex, onEdge, onTile, tileMode, touch = false, selected = null }: BoardProps) {
+export function Board({ state, highlightVertices, highlightEdges, highlightTiles, ghost, ghostColor, onVertex, onEdge, onTile, tileMode, touch = false, selected = null, viewer = null }: BoardProps) {
   const { board } = state;
   const [hoverV, setHoverV] = useState<number | null>(null);
   const [hoverE, setHoverE] = useState<number | null>(null);
@@ -88,8 +91,11 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
   }, [board]);
 
   const playerColor = (p: number) => companyById(state.players[p].companyId);
-  const report = state.lastProduction;
-  const prodKey = `${state.turn}-${state.lastRoll?.total ?? 0}-${state.log.length}`;
+  // The latest roll stays lit for a moment even after the roller ends its turn.
+  const flash = useRollFlash(state);
+  const report = flash?.report ?? null;
+  const prodKey = `roll-${flash?.seq ?? 0}`;
+  const fresh = useFreshBuilds(state);
 
   return (
     <svg className="board" viewBox={viewBox} role="img" aria-label="Settlers of Compute board">
@@ -124,6 +130,7 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
       {/* backdrop plate */}
       <circle cx={0} cy={0} r={S * 5.4} fill="url(#sea)" />
       <polygon points={hexPoints(0, 0, S * 4.75)} transform="rotate(30)" className="board-plate" />
+      {flash?.roll.total === 7 && <polygon key={`seven-${flash.seq}`} points={hexPoints(0, 0, S * 4.75)} transform="rotate(30)" className="plate-seven" pointerEvents="none" />}
 
       {/* ports */}
       {board.ports.map((port) => {
@@ -157,7 +164,8 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
         const cx = tile.x * S;
         const cy = tile.y * S;
         const c = tileColors(tile.type);
-        const producing = report && report.tileIds.includes(tile.id) && report.blockedTileId !== tile.id;
+        const producing = !!report && report.tileIds.includes(tile.id) && report.blockedTileId !== tile.id;
+        const blocked = !!report && report.blockedTileId === tile.id;
         const hot = tile.number === 6 || tile.number === 8;
         const label = tile.type === 'barren' ? BARREN_INFO.label : RESOURCE_INFO[tile.type].label;
         return (
@@ -165,20 +173,39 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
             <title>{`${label}${tile.number ? ` · produces on ${tile.number} (${pips(tile.number)}/36)` : ''}`}</title>
             <polygon points={hexPoints(cx, cy, S * 0.97)} fill={`url(#tile-${tile.type})`} stroke={c.color} strokeOpacity={0.55} strokeWidth={1.5} />
             <polygon points={hexPoints(cx, cy, S * 0.82)} fill="none" stroke={c.color} strokeOpacity={0.18} strokeWidth={1} />
-            {producing && <polygon key={prodKey} points={hexPoints(cx, cy, S * 0.95)} className="tile-produce" style={{ stroke: c.color }} />}
+            {producing && (
+              <g key={prodKey} className="tile-lit" pointerEvents="none" style={{ ['--res' as string]: c.color }}>
+                <polygon points={hexPoints(cx, cy, S * 0.95)} className="tile-lit-fill" />
+                <polygon points={hexPoints(cx, cy, S * 0.95)} className="tile-produce" style={{ stroke: c.color }} />
+              </g>
+            )}
             <g transform={`translate(${cx - 13},${cy - 33}) scale(1.08)`} opacity={0.95}>
               <ResourceGlyph type={tile.type} color={c.color} />
             </g>
             {tile.number !== null && (
               <g transform={`translate(${cx},${cy + 12})`}>
-                <circle r={17} className={`token${hot ? ' hot' : ''}`} />
-                <text y={4} textAnchor="middle" className={`token-num${hot ? ' hot' : ''}`}>
-                  {tile.number}
-                </text>
-                <g transform="translate(0,11)">
-                  {Array.from({ length: pips(tile.number) }).map((_, i, arr) => (
-                    <circle key={i} cx={(i - (arr.length - 1) / 2) * 3.6} cy={0} r={1.15} className={`pip${hot ? ' hot' : ''}`} />
-                  ))}
+                <g key={producing ? prodKey : 'token'} className={producing ? 'token-pulse' : undefined} style={producing ? { ['--res' as string]: c.color } : undefined}>
+                  {producing && <circle r={17} className="token-halo" />}
+                  <circle r={17} className={`token${hot ? ' hot' : ''}`} />
+                  <text y={4} textAnchor="middle" className={`token-num${hot ? ' hot' : ''}`}>
+                    {tile.number}
+                  </text>
+                  <g transform="translate(0,11)">
+                    {Array.from({ length: pips(tile.number) }).map((_, i, arr) => (
+                      <circle key={i} cx={(i - (arr.length - 1) / 2) * 3.6} cy={0} r={1.15} className={`pip${hot ? ' hot' : ''}`} />
+                    ))}
+                  </g>
+                </g>
+              </g>
+            )}
+            {blocked && (
+              <g key={prodKey} className="tile-blocked" pointerEvents="none">
+                <polygon points={hexPoints(cx, cy, S * 0.95)} className="tile-blocked-fill" />
+                <g transform={`translate(${cx},${cy - 2})`}>
+                  <rect x={-34} y={-11} width={68} height={22} rx={11} className="tile-blocked-pill" />
+                  <text y={4.5} textAnchor="middle" className="tile-blocked-text">
+                    BLOCKED
+                  </text>
                 </g>
               </g>
             )}
@@ -197,7 +224,7 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
         const cx = tile.x * S;
         const cy = tile.y * S;
         return (
-          <g className="outage" pointerEvents="none">
+          <g key={`outage-${state.disruptionTile}`} className="outage" pointerEvents="none">
             <polygon points={hexPoints(cx, cy, S * 0.95)} fill="url(#outage-hatch)" />
             <g transform={`translate(${cx},${cy - 22})`}>
               <circle r={15} className="outage-ring" />
@@ -225,7 +252,6 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
         const y2 = a.y + (b.y - a.y) * 0.84;
         return (
           <g key={`road-${e.id}`} className="road">
-            <line x1={x1 * S} y1={y1 * S} x2={x2 * S} y2={y2 * S} stroke={co.color} strokeWidth={18} strokeLinecap="round" className="fresh-road" />
             <line x1={x1 * S} y1={y1 * S} x2={x2 * S} y2={y2 * S} stroke={co.stroke} strokeWidth={11} strokeLinecap="round" />
             <line x1={x1 * S} y1={y1 * S} x2={x2 * S} y2={y2 * S} stroke={co.color} strokeWidth={6.5} strokeLinecap="round" />
           </g>
@@ -262,17 +288,39 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
         );
       })}
 
+      {/* fresh connections: a glow drawn along the new road */}
+      {[...fresh.edges].map(([id, p]) => {
+        const owner = state.roads[id];
+        if (owner === null) return null;
+        const e = board.edges[id];
+        const a = board.vertices[e.a];
+        const b = board.vertices[e.b];
+        return (
+          <line
+            key={`rp-${id}-${p.seq}`}
+            x1={(a.x + (b.x - a.x) * 0.16) * S}
+            y1={(a.y + (b.y - a.y) * 0.16) * S}
+            x2={(a.x + (b.x - a.x) * 0.84) * S}
+            y2={(a.y + (b.y - a.y) * 0.84) * S}
+            pathLength={1}
+            className="road-pulse"
+            style={{ stroke: playerColor(owner).color }}
+            pointerEvents="none"
+          />
+        );
+      })}
+
       {/* buildings */}
       {state.buildings.map((bld, v) => {
         if (!bld) return null;
         const vx = board.vertices[v].x * S;
         const vy = board.vertices[v].y * S;
         const co = playerColor(bld.owner);
+        // A financed factory wears a dashed ring and a badge with the units it still owes.
         const financed = isFinanced(bld);
         const stalled = financed && board.vertices[v].tileIds.includes(state.disruptionTile);
         return (
-          <g key={`b-${v}-${bld.kind}`}>
-            <circle cx={vx} cy={vy} r={14} className="fresh-ring" style={{ stroke: co.color }} />
+          <g key={`b-${v}-${bld.kind}`} className={`building ${bld.kind}`}>
             {financed && <circle cx={vx} cy={vy} r={21} className={`financed-ring${stalled ? ' stalled' : ''}`} />}
             {bld.kind === 'cluster' ? (
               <ClusterShape x={vx} y={vy} color={co.color} stroke={co.stroke} />
@@ -285,6 +333,34 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
                 <circle r={8.5} />
                 <text y={3.6} textAnchor="middle">
                   {bld.financed}
+                </text>
+              </g>
+            )}
+          </g>
+        );
+      })}
+
+      {/* build pulses: rings, and the Compute Points the piece just earned */}
+      {[...fresh.vertices].map(([v, p]) => {
+        const bld = state.buildings[v];
+        if (!bld) return null;
+        const vx = board.vertices[v].x * S;
+        const vy = board.vertices[v].y * S;
+        return (
+          <g
+            key={`bp-${v}-${p.seq}`}
+            className={`build-pulse${bld.owner === viewer ? ' mine' : ''}`}
+            transform={`translate(${vx},${vy})`}
+            style={{ ['--co' as string]: playerColor(bld.owner).color }}
+            pointerEvents="none"
+          >
+            <circle r={16} className="build-ring" />
+            <circle r={16} className="build-ring late" />
+            {p.cp > 0 && (
+              <g className="build-cp">
+                <rect x={-23} y={-43} width={46} height={19} rx={9.5} />
+                <text y={-29.5} textAnchor="middle">
+                  +{p.cp} CP
                 </text>
               </g>
             )}
@@ -348,33 +424,37 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
           .flatMap((t) => {
             const tile = board.tiles[t];
             if (tile.type === 'barren') return [];
+            // Payouts are read from the buildings as they stood at the roll.
+            const buildings = flash!.buildings;
             return tile.vertexIds
-              .filter((v) => state.buildings[v])
+              .filter((v) => buildings[v])
               .map((v, i) => {
-                const bld = state.buildings[v]!;
+                const bld = buildings[v]!;
                 const vert = board.vertices[v];
                 // A financed factory pays 1, even on the roll that completes its commitment.
                 const delivered = (report.deliveries ?? []).some((d) => d.vertex === v);
                 const n = delivered ? 1 : outputMultiplier(bld);
                 const res = tile.type as Exclude<TileType, 'barren'>;
                 const short = report.shortages.includes(res);
+                const mine = viewer !== null && bld.owner === viewer;
                 // Float the chip just above the producing building (buildings are 2+ steps apart,
-                // so chips never collide).
-                const ox = 0;
-                const oy = -24;
+                // so chips never collide). The viewer's own chips are larger and ringed in their color.
                 return (
-                  <g key={`${prodKey}-${t}-${v}-${i}`} className="payout" transform={`translate(${vert.x * S + ox},${vert.y * S + oy})`} pointerEvents="none">
-                    <rect x={-20} y={-12} width={40} height={22} rx={11} fill="#0b1020" stroke={RESOURCE_INFO[res].color} strokeWidth={1.5} />
-                    <text x={-6} y={4} textAnchor="middle" className="payout-text" fill={RESOURCE_INFO[res].color}>
-                      {short ? '✕' : `+${n}`}
-                    </text>
-                    {delivered && !short && (
-                      <text x={0} y={21} textAnchor="middle" className="payout-repaid">
-                        +1 repaid
+                  <g key={`${prodKey}-${t}-${v}-${i}`} transform={`translate(${vert.x * S},${vert.y * S - (mine ? 28 : 24)})`} pointerEvents="none">
+                    <g className={`payout${mine ? ' mine' : ''}${short ? ' short' : ''}`} style={{ ['--co' as string]: playerColor(bld.owner).color }}>
+                      {mine && <rect x={-24} y={-15} width={48} height={28} rx={14} className="payout-ring" />}
+                      <rect x={-20} y={-12} width={40} height={22} rx={11} fill="#0b1020" stroke={RESOURCE_INFO[res].color} strokeWidth={1.5} />
+                      <text x={-6} y={4} textAnchor="middle" className="payout-text" fill={RESOURCE_INFO[res].color}>
+                        {short ? '✕' : `+${n}`}
                       </text>
-                    )}
-                    <g transform="translate(3,-7) scale(0.55)">
-                      <ResourceGlyph type={res} color={RESOURCE_INFO[res].color} />
+                      {delivered && !short && (
+                        <text x={0} y={21} textAnchor="middle" className="payout-repaid">
+                          +1 repaid
+                        </text>
+                      )}
+                      <g transform="translate(3,-7) scale(0.55)">
+                        <ResourceGlyph type={res} color={RESOURCE_INFO[res].color} />
+                      </g>
                     </g>
                   </g>
                 );
