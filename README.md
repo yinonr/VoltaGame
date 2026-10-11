@@ -2,6 +2,8 @@
 
 *Build your AI empire. Before someone else builds theirs.*
 
+**▶ Play now: https://yinonr.github.io/VoltaGame/** (desktop or phone)
+
 **Settlers of Compute** is a browser strategy game inspired by the familiar mechanics of Settlers of Catan, reimagined around the AI compute economy. You are the founder of an ambitious AI startup. Three rival AI companies want the same scarce inputs — **Power, Networking, Land, Capital and GPUs** — and the first company to **10 Compute Points** becomes the market leader.
 
 > **Premise.** For years, only the largest companies could lock up the land, power and GPUs behind frontier AI. This game imagines a market where compute behaves more like a utility — so the startups get to compete. *You don't have to be a hyperscaler to compete in AI anymore.*
@@ -78,7 +80,7 @@ The production build uses the base path `/VoltaGame/` (see `vite.config.ts`; ove
 
 `.github/workflows/deploy.yml` tests, builds and publishes `dist/` on every push to `main`. One-time setup by a repository admin: **Settings → Pages → Build and deployment → Source: GitHub Actions**. Then re-run the latest "Deploy to GitHub Pages" workflow, or push to `main`. The site will be served at `https://yinonr.github.io/VoltaGame/`.
 
-> Status (2026-10-11): `main` is up to date, and the workflow's test and build steps pass on GitHub. Deployment is waiting on that one-time Pages setting; until then the workflow stops at `configure-pages` with "Get Pages site failed".
+> **Live:** https://yinonr.github.io/VoltaGame/. Pages is enabled, and every push to `main` redeploys.
 
 Any other static host works too: upload the contents of `dist/`.
 

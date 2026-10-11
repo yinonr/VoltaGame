@@ -17,15 +17,12 @@ _Last updated: 2026-10-11, end of session 1 (including the mobile + deployment c
   - a docs commit on top of `d120891`: HANDOFF, MULTIPLAYER_PLAN, README, GAME_DESIGN
 - **CI:** the `CI` workflow passed on branch pushes `fc526fa` and `1ac2521`. On `main` (`d120891`) the deploy workflow passed `npm ci`, `npm test` and `npm run build` on ubuntu-latest.
 
-## Deployment status: blocked on one owner setting
+## Deployment status: deployed
 
-- `.github/workflows/deploy.yml` runs on every push to `main`. Run **38099330606** (commit `d120891`) passed install, tests and build, then failed at `actions/configure-pages@v5` with *"Get Pages site failed… verify that the repository has Pages enabled and configured to build using GitHub Actions"* (HTTP 404). **Pages has never been enabled for this repository**, and the workflow's `GITHUB_TOKEN` is not allowed to enable it.
-- **Manual steps for the repository owner (about 1 minute):**
-  1. Open https://github.com/yinonr/VoltaGame/settings/pages
-  2. Under **Build and deployment → Source**, choose **GitHub Actions**. No branch selection is needed.
-  3. Open https://github.com/yinonr/VoltaGame/actions/workflows/deploy.yml, open the latest run and click **Re-run all jobs**. Pushing any commit to `main` also works.
-  4. When the `deploy` job turns green, the game is live at **https://yinonr.github.io/VoltaGame/**. The job summary shows the URL.
-- **Not verified:** the live URL has never loaded successfully, because deployment hasn't happened yet. This cloud environment also cannot reach `*.github.io` or the Pages API (blocked by egress policy), so verify on your own device after the re-run.
+- The owner enabled GitHub Pages (Source: GitHub Actions) on 2026-10-11.
+- Deploy workflow run **38099492162** (attempt 2, commit `1d5c4be`) passed every step: `npm ci`, `npm test`, build, `configure-pages`, upload, and `deploy-pages`. It reported *"Reported success! … environment url: https://yinonr.github.io/VoltaGame/"*.
+- **Live URL:** https://yinonr.github.io/VoltaGame/. Every push to `main` redeploys automatically.
+- **Not verified from here:** this cloud environment cannot reach `*.github.io` (egress policy), so success is confirmed from the GitHub Actions deploy log only. The owner should load it once on desktop and once on an iPhone.
 
 ## Feature status
 
@@ -37,7 +34,7 @@ _Last updated: 2026-10-11, end of session 1 (including the mobile + deployment c
 | Local pass-and-play (2–4 seats, human/AI mix), spectate, autosave | Done |
 | Desktop layout (1280–1920 wide) | Done, unchanged by the mobile work |
 | **Phone layout, portrait + landscape** | **Done**, tested in emulation (see below) |
-| GitHub Pages deploy workflow | Done in repo; **blocked on the owner enabling Pages** |
+| GitHub Pages deploy | **Deployed**: https://yinonr.github.io/VoltaGame/ (per the Actions deploy log) |
 | Online multiplayer | **Not started.** Plan in `docs/MULTIPLAYER_PLAN.md` |
 
 ## Mobile functionality completed
@@ -94,7 +91,7 @@ Use **Cloudflare Workers + one Durable Object per room**:
 
 ## Next steps (for the 9:40 PM session)
 
-1. **Owner:** enable Pages (steps above), re-run the deploy workflow, and open https://yinonr.github.io/VoltaGame/ on an iPhone to check the mobile items listed above.
+1. **Owner:** open https://yinonr.github.io/VoltaGame/ on an iPhone and check the mobile items listed above.
 2. Fix anything found on the real device. Keep it small: CSS and layout only.
 3. Implement online multiplayer following `docs/MULTIPLAYER_PLAN.md`, in order:
    1. `viewFor` + leak tests;
