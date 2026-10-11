@@ -54,13 +54,13 @@ function fallbackAction(s: GameState, actor: number): Action {
 }
 
 const DELAYS: Partial<Record<Action['type'], number>> = {
-  ROLL: 750,
-  END_TURN: 650,
+  ROLL: 700,
+  END_TURN: 550,
   RESPOND_TRADE: 900,
   PROPOSE_TRADE: 800,
   DISCARD: 450,
-  MOVE_DISRUPTION: 900,
-  BANK_TRADE: 650,
+  MOVE_DISRUPTION: 850,
+  BANK_TRADE: 600,
   SETUP_CLUSTER: 450,
   SETUP_ROAD: 350,
 };
@@ -112,7 +112,7 @@ export function useGame() {
       console.error('AI decision failed', e);
       action = fallbackAction(state, actor);
     }
-    const base = DELAYS[action.type] ?? 700;
+    const base = DELAYS[action.type] ?? 620;
     const delay = speed === 'turbo' ? 25 : speed === 'fast' ? Math.round(base * 0.3) : base;
     const timer = window.setTimeout(() => {
       const cur = stateRef.current;

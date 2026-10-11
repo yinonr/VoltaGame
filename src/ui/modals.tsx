@@ -381,7 +381,7 @@ export function WinnerModal({
         <h1>{headline}</h1>
         <p className="muted">
           {youWon
-            ? `Parallax-scale ambition, startup-sized balance sheet — and you still got there first. ${standings[0].sb.total} Compute Points in ${Math.ceil(state.turn / state.players.length)} rounds.`
+            ? `Frontier ambition, startup-sized balance sheet — and you still scaled first. ${standings[0].sb.total} Compute Points in ${Math.ceil(state.turn / state.players.length)} rounds.`
             : `${winner.name} (${c.sector}) reached ${standings[0].sb.total} Compute Points in ${Math.ceil(state.turn / state.players.length)} rounds. The market is still young — run it back.`}
         </p>
       </div>

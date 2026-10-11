@@ -122,31 +122,36 @@ export const BARREN_INFO = {
   blurb: 'No grid access yet. The Grid Disruption marker starts here.',
 };
 
-export const DEV_CARD_INFO: Record<DevCardType, { title: string; analog: string; text: string }> = {
+export const DEV_CARD_INFO: Record<DevCardType, { title: string; analog: string; text: string; short: string }> = {
   priority: {
     title: 'Infrastructure Priority',
     analog: 'Knight',
     text: 'Move the Grid Disruption marker and take 1 random resource from a rival next to it. Counts toward the Priority Access bonus.',
+    short: 'Move the outage, take 1 resource. Counts toward Priority Access.',
   },
   expansion: {
     title: 'Network Expansion',
     analog: 'Road Building',
     text: 'Place 2 Network Connections for free.',
+    short: 'Place 2 free connections.',
   },
   grant: {
     title: 'Resource Grant',
     analog: 'Year of Plenty',
     text: 'Take any 2 resources from the market supply.',
+    short: 'Take any 2 resources from the market.',
   },
   consolidation: {
     title: 'Market Consolidation',
     analog: 'Monopoly',
     text: 'Name a resource. Every rival gives you all of theirs.',
+    short: 'Name a resource; rivals hand over all of it.',
   },
   breakthrough: {
     title: 'AI Breakthrough',
     analog: 'Victory Point',
     text: 'A secret +1 Compute Point. Revealed when you win.',
+    short: 'Secret +1 Compute Point.',
   },
 };
 

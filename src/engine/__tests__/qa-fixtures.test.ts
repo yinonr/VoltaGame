@@ -1,0 +1,39 @@
+import { it } from 'vitest';
+import { writeFileSync } from 'node:fs';
+import { createGame, applyAction } from '../game';
+import { buildDemoGame } from '../demo';
+import { COSTS } from '../constants';
+import { legalClusterVertices } from '../rules';
+import { victoryPoints } from '../scoring';
+import { setHand, withNextRoll, place } from './helpers';
+import type { GameState } from '../types';
+
+// Dev tool: `QA_GEN=/some/dir npx vitest run qa-fixtures` writes saved-game JSON fixtures
+// for browser QA (load them into localStorage key settlers-of-compute:save:v1). Skipped otherwise.
+const OUT = process.env.QA_GEN ?? '';
+it.runIf(process.env.QA_GEN)('generate QA states', () => {
+  // A: human to roll a 7 while holding 9 cards
+  let a = createGame({ seed: 4242 });
+  a = setHand(a, 0, { power: 3, networking: 2, land: 2, capital: 1, gpu: 1 });
+  a = withNextRoll(a, 7);
+  writeFileSync(OUT + '/qa-seven.json', JSON.stringify(a));
+
+  // B: human main phase holding one of each playable card (bought earlier)
+  let b = createGame({ seed: 777 });
+  b = applyAction(withNextRoll(b, 8), { type: 'ROLL' });
+  b = { ...b, players: b.players.map((p) => p.id === 0 ? { ...p, devCards: [
+    { id: 501, type: 'priority', boughtOnTurn: 0 }, { id: 502, type: 'expansion', boughtOnTurn: 0 },
+    { id: 503, type: 'grant', boughtOnTurn: 0 }, { id: 504, type: 'consolidation', boughtOnTurn: 0 }, { id: 505, type: 'breakthrough', boughtOnTurn: 0 } ] } : p) };
+  writeFileSync(OUT + '/qa-cards.json', JSON.stringify(b));
+
+  // C: human at 9 CP, can afford a cluster on a legal site
+  let c: GameState = buildDemoGame();
+  let guard = 0;
+  while (victoryPoints(c, 0) < 9 && guard++ < 10) {
+    const v = c.buildings.findIndex((b) => b?.owner === 0 && b.kind === 'cluster');
+    c = place(c, v, 0, 'factory');
+  }
+  c = setHand(c, 0, COSTS.cluster);
+  writeFileSync(OUT + '/qa-win.json', JSON.stringify(c));
+  console.log('C vp', victoryPoints(c, 0), 'sites', legalClusterVertices(c, 0).length);
+});

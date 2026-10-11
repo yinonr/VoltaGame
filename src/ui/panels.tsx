@@ -10,6 +10,14 @@ import { RESOURCES } from '../engine/types';
 import { ClusterShape, FactoryShape } from './Board';
 import { DieFace, ResourceChip, ResourceIcon } from './icons';
 
+function PieceGlyph({ kind, color, stroke }: { kind: 'cluster' | 'factory'; color: string; stroke: string }) {
+  return (
+    <svg width="13" height="13" viewBox="-17 -20 34 34" aria-hidden="true" className="piece-glyph">
+      {kind === 'cluster' ? <ClusterShape x={0} y={-3} color={color} stroke={stroke} /> : <FactoryShape x={0} y={-2} color={color} stroke={stroke} scale={0.95} />}
+    </svg>
+  );
+}
+
 export function CompanyDot({ companyId, size = 10 }: { companyId: string; size?: number }) {
   const c = companyById(companyId);
   return <span className="company-dot" style={{ width: size, height: size, background: c.color, borderColor: c.stroke }} />;
@@ -56,14 +64,21 @@ export function Scoreboard({ state, viewer }: { state: GameState; viewer: number
               <span style={{ width: `${Math.min(100, (shown / VP_TO_WIN) * 100)}%` }} />
             </div>
             <div className="company-stats">
-              <span title="Resources in hand (hand limit 7 on a Grid Disruption)" className={cards > 7 ? 'warn' : ''}>
-                ▤ {cards}
+              <span title="Resources in hand (over 7 risks a discard on a Grid Disruption)" className={cards > 7 ? 'warn' : ''}>
+                <i>Hand</i> {cards}
               </span>
-              <span title="Unplayed Innovation Cards">◈ {p.devCards.length}</span>
-              <span title="Infrastructure Priority cards played">⚑ {p.priorityPlayed}</span>
-              <span title="Longest connected network">⟿ {longestNetwork(state, p.id)}</span>
-              <span title="Clusters / Factories on the board" className="pieces">
-                {5 - left.cluster}▪ {4 - left.factory}▲
+              <span title="Unplayed Innovation Cards">
+                <i>Cards</i> {p.devCards.length}
+              </span>
+              <span title="Infrastructure Priority cards played (3+ and most wins Priority Access)">
+                <i>Priority</i> {p.priorityPlayed}
+              </span>
+              <span title="Longest connected network (5+ and longest wins Longest Network)">
+                <i>Net</i> {longestNetwork(state, p.id)}
+              </span>
+              <span className="pieces" title={`${5 - left.cluster} Compute Clusters and ${4 - left.factory} AI Factories on the board`}>
+                <PieceGlyph kind="cluster" color={c.color} stroke={c.stroke} /> {5 - left.cluster}
+                <PieceGlyph kind="factory" color={c.color} stroke={c.stroke} /> {4 - left.factory}
               </span>
             </div>
             <div className="badges">
@@ -238,12 +253,20 @@ export function BuildPanel({
               onClick={() => onSelect(t)}
               disabled={!check.ok && !active}
               aria-pressed={active}
-              title={check.ok ? `Build ${BUILD_LABELS[t]}` : check.reason}
+              title={check.ok ? `Build ${BUILD_LABELS[t]} — ${BUILD_VALUE[t]}` : check.reason}
             >
               <BuildGlyph type={t} color={company.color} stroke={company.stroke} />
               <span className="build-text">
-                <strong>{BUILD_LABELS[t]}</strong>
-                <span className="small muted">{BUILD_VALUE[t]}</span>
+                <strong>
+                  {BUILD_LABELS[t]} <span className="left-count">{t === 'card' ? `${piecesInfo} in deck` : `${piecesInfo} left`}</span>
+                </strong>
+                {active ? (
+                  <span className="small hint">Pick a glowing spot · Esc to cancel</span>
+                ) : check.ok ? (
+                  <span className="small muted">{BUILD_VALUE[t]}</span>
+                ) : (
+                  <span className="small why">{check.reason}</span>
+                )}
               </span>
               <span className="cost">
                 {RESOURCES.filter((r) => COSTS[t][r] > 0).map((r) => (
@@ -251,10 +274,6 @@ export function BuildPanel({
                 ))}
               </span>
             </button>
-            <div className="build-foot small">
-              <span className="muted">{t === 'card' ? `${piecesInfo} in deck` : `${piecesInfo} left`}</span>
-              {active ? <span className="hint">Choose a glowing spot · Esc to cancel</span> : !check.ok && <span className="why">{check.reason}</span>}
-            </div>
           </div>
         );
       })}
@@ -296,7 +315,7 @@ export function CardsPanel({ state, player, onPlay }: { state: GameState; player
           const info = DEV_CARD_INFO[type];
           const check = type === 'breakthrough' ? null : checkPlayCard(state, player, type);
           return (
-            <li key={type} className={`card-item card-${type}`}>
+            <li key={type} className={`card-item card-${type}`} title={info.text}>
               <div className="card-head">
                 <strong>
                   {info.title}
@@ -310,7 +329,7 @@ export function CardsPanel({ state, player, onPlay }: { state: GameState; player
                   </button>
                 )}
               </div>
-              <p className="small muted">{info.text}</p>
+              <p className="small muted">{info.short}</p>
               {g.fresh > 0 && type !== 'breakthrough' && <p className="small hint">New — playable next turn.</p>}
               {check && !check.ok && g.fresh === 0 && <p className="small why">{check.reason}</p>}
             </li>

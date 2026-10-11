@@ -308,9 +308,10 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
                 const n = bld.kind === 'factory' ? 2 : 1;
                 const res = tile.type as Exclude<TileType, 'barren'>;
                 const short = report.shortages.includes(res);
-                // Nudge the chip toward the producing tile so multiple payouts at one corner don't overlap.
-                const ox = (tile.x - vert.x) * S * 0.35;
-                const oy = (tile.y - vert.y) * S * 0.35;
+                // Float the chip just above the producing building (buildings are 2+ steps apart,
+                // so chips never collide).
+                const ox = 0;
+                const oy = -24;
                 return (
                   <g key={`${prodKey}-${t}-${v}-${i}`} className="payout" transform={`translate(${vert.x * S + ox},${vert.y * S + oy})`} pointerEvents="none">
                     <rect x={-20} y={-12} width={40} height={22} rx={11} fill="#0b1020" stroke={RESOURCE_INFO[res].color} strokeWidth={1.5} />
