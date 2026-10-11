@@ -16,12 +16,13 @@ import {
   describeBundle,
   hasBundle,
   pips,
+  resourceLabel,
   sanitizeCompanyName,
   sumBundle,
 } from './constants';
 import { bestSetupRoad, bestSetupVertex } from './evaluation';
 import { applyMarketEvents } from './events';
-import { applyFinancedUpgrade, applyRefinance, outputMultiplier } from './financing';
+import { applyFinancedUpgrade, applyRefinance, isFinanced, outputMultiplier } from './financing';
 import { applyIntegratedDeployment, updateFullStack } from './fullstack';
 import { GameError, addLog, announceLongest, gainFromBank, nameOf, pay } from './mutate';
 import { Rng, deriveSeed, randomSeed } from './rng';
@@ -41,6 +42,7 @@ import type { PlayableCardType } from './rules';
 import { updateLongestNetwork, updatePriorityAccess, victoryPoints } from './scoring';
 import type {
   Action,
+  Delivery,
   DevCardType,
   GameState,
   Player,
@@ -252,11 +254,14 @@ function produce(s: GameState, roll: number): ProductionReport {
   const owed: ResourceBundle[] = s.players.map(() => bundle());
   const tileIds: number[] = [];
   let blocked: number | null = null;
+  // Infrastructure Financing: a financed factory is owed 1 like a cluster; its would-be bonus unit
+  // is a committed unit that never leaves the market (so it never counts toward a shortage).
+  const pending: { vertex: number; owner: number; resource: Resource }[] = [];
   for (const tile of s.board.tiles) {
     if (tile.number !== roll) continue;
     tileIds.push(tile.id);
     if (tile.id === s.disruptionTile) {
-      blocked = tile.id;
+      blocked = tile.id; // an outage pays nothing, so a commitment there stalls
       continue;
     }
     if (tile.type === 'barren') continue;
@@ -264,6 +269,7 @@ function produce(s: GameState, roll: number): ProductionReport {
       const b = s.buildings[v];
       if (!b) continue;
       owed[b.owner][tile.type] += outputMultiplier(b);
+      if (isFinanced(b)) pending.push({ vertex: v, owner: b.owner, resource: tile.type });
     }
   }
   const gains: ResourceBundle[] = s.players.map(() => bundle());
@@ -282,7 +288,19 @@ function produce(s: GameState, roll: number): ProductionReport {
     }
   }
   gains.forEach((g, i) => gainFromBank(s, i, g));
-  return { roll, tileIds, blockedTileId: blocked, gains, shortages };
+  // A committed unit is delivered only when its resource paid out in full (any shortage, including
+  // the sole-claimant partial payout, delivers nothing). Buildings are shared with earlier states:
+  // write a new object, and drop the field entirely once the commitment is complete.
+  const deliveries: Delivery[] = [];
+  for (const d of pending) {
+    if (shortages.includes(d.resource)) continue;
+    const b = s.buildings[d.vertex]!;
+    if (!isFinanced(b)) continue; // already completed by an earlier payout this roll
+    const left = b.financed! - 1;
+    s.buildings[d.vertex] = left > 0 ? { owner: b.owner, kind: 'factory', financed: left } : { owner: b.owner, kind: 'factory' };
+    deliveries.push({ player: d.owner, vertex: d.vertex, resource: d.resource, left });
+  }
+  return { roll, tileIds, blockedTileId: blocked, gains, shortages, deliveries };
 }
 
 function stealRandom(s: GameState, rng: Rng, thief: number, victim: number): Resource | null {
@@ -411,8 +429,18 @@ export function applyAction(state: GameState, action: Action): GameState {
           if (sumBundle(g) > 0) addLog(s, 'produce', i, `${nameOf(s, i)} collected ${describeBundle(g)}.`);
         });
         for (const r of report.shortages) addLog(s, 'produce', null, `Market shortage: not enough ${RESOURCE_INFO[r].label} for everyone.`);
-        if (report.gains.every((g) => sumBundle(g) === 0) && report.blockedTileId === null) {
+        if (report.gains.every((g) => sumBundle(g) === 0) && report.blockedTileId === null && report.shortages.length === 0) {
           addLog(s, 'produce', null, 'No infrastructure on that number — nothing produced.');
+        }
+        for (const d of report.deliveries ?? []) {
+          const who = `${nameOf(s, d.player)}'s financed AI Factory`;
+          const unit = `1 ${resourceLabel(d.resource, 1)}`;
+          if (d.left > 0) {
+            addLog(s, 'finance', d.player, `${who} delivered ${unit} of its commitment (${d.left} left).`);
+          } else {
+            addLog(s, 'finance', d.player, `${who} delivered ${unit}, its last committed unit.`);
+            addLog(s, 'finance', d.player, `${who} is fully delivered: now a full AI Factory (+1 CP, double output).`);
+          }
         }
         s.phase = 'main';
       }

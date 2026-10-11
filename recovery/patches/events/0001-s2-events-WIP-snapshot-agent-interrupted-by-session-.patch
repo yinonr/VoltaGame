@@ -1,0 +1,824 @@
+From 47cf61e89fe5b39d4a0788bf2f54c915741d385e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 11 Oct 2026 05:16:27 +0000
+Subject: [PATCH] s2/events: WIP snapshot (agent interrupted by session limit;
+ unverified)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01P9tr9NPSVt39359TmWrAhk
+---
+ src/engine/__tests__/events.test.ts | 420 ++++++++++++++++++++++++++++
+ src/engine/events.ts                | 162 ++++++++++-
+ src/ui/MarketEventBanner.tsx        |  66 +++++
+ src/ui/styles/events.css            | 124 ++++++++
+ 4 files changed, 769 insertions(+), 3 deletions(-)
+ create mode 100644 src/engine/__tests__/events.test.ts
+ create mode 100644 src/ui/MarketEventBanner.tsx
+
+diff --git a/src/engine/__tests__/events.test.ts b/src/engine/__tests__/events.test.ts
+new file mode 100644
+index 0000000..5dd77f1
+--- /dev/null
++++ b/src/engine/__tests__/events.test.ts
+@@ -0,0 +1,420 @@
++import { describe, expect, it } from 'vitest';
++import { decideAIAction } from '../ai';
++import { FINANCING_MAX_COMMITMENT, bundle } from '../constants';
++import { MARKET_EVENT_INFO, applyMarketEvents, eventGap, firstEventTurn, recentMarketEvent, seededEventType } from '../events';
++import { applyAction, createGame, disruptionVictims, getActingPlayer } from '../game';
++import { legalSetupClusterVertices } from '../rules';
++import { victoryPoints } from '../scoring';
++import type { Action, GameState, MarketEventType, ResourceBundle, RuleOptions } from '../types';
++import { RESOURCES } from '../types';
++import { ALL_AI, blankGame, conservation, place, setHand } from './helpers';
++
++const EVENTS_ON: RuleOptions = { financing: true, fullStack: false, marketEvents: true };
++const FLAGSHIP_EVENTS: Partial<RuleOptions> = { financing: true, fullStack: true, marketEvents: true };
++const FULL = bundle({ power: 19, networking: 19, land: 19, capital: 19, gpu: 19 });
++const END_TURN: Action = { type: 'END_TURN' };
++
++function deepFreeze<T>(o: T): T {
++  if (o && typeof o === 'object' && !Object.isFrozen(o)) {
++    Object.freeze(o);
++    for (const v of Object.values(o)) deepFreeze(v);
++  }
++  return o;
++}
++
++/** A financed AI Factory written directly (the financing engine is not needed to test events). */
++function financed(s: GameState, vertex: number, owner: number, units: number): GameState {
++  const buildings = s.buildings.slice();
++  buildings[vertex] = { owner, kind: 'factory', financed: units };
++  return { ...s, buildings };
++}
++
++/** First turn at or after `from` on which the seed calls for `type`. */
++function turnFor(seed: number, type: MarketEventType, from = 20): number {
++  for (let t = from; ; t++) if (seededEventType(seed, t) === type) return t;
++}
++
++/** Main phase of the turn just before a scheduled event that the seed resolves as `type`. */
++function primed(seed: number, type: MarketEventType): GameState {
++  const s = blankGame(seed);
++  const t = turnFor(s.seed, type);
++  return { ...s, rules: { ...EVENTS_ON }, turn: t - 1, market: { nextEventTurn: t, last: null } };
++}
++
++function eventLines(s: GameState, sinceLogId: number): string[] {
++  return s.log.filter((l) => l.kind === 'event' && l.id >= sinceLogId).map((l) => l.text);
++}
++
++function noNegatives(s: GameState): boolean {
++  return [s.bank, ...s.players.map((p) => p.resources)].every((b) => RESOURCES.every((r) => b[r] >= 0));
++}
++
++interface Played {
++  s: GameState;
++  rolls: number[];
++  /** Turns on which a market event fired. */
++  eventTurns: number[];
++  types: MarketEventType[];
++}
++
++/** An all-AI game. `check` sees every END_TURN transition (before, after). */
++function playAI(seed: number, rules: Partial<RuleOptions> | undefined, prep?: (s: GameState) => GameState, check?: (before: GameState, after: GameState) => void): Played {
++  let s = createGame({ seed, seats: ALL_AI, rules });
++  if (prep) s = prep(s);
++  const rolls: number[] = [];
++  const eventTurns: number[] = [];
++  const types: MarketEventType[] = [];
++  for (let steps = 0; s.phase !== 'gameOver' && steps < 6000; steps++) {
++    const action = decideAIAction(s, getActingPlayer(s)!);
++    const next = applyAction(s, action);
++    if (action.type === 'ROLL') rolls.push(next.lastRoll!.total);
++    if (action.type === 'END_TURN') {
++      check?.(s, next);
++      const last = next.market?.last;
++      if (last && last !== s.market?.last) {
++        eventTurns.push(last.turn);
++        types.push(last.type);
++      }
++    }
++    s = next;
++  }
++  return { s, rolls, eventTurns, types };
++}
++
++describe('market events: gating', () => {
++  it('are a strict no-op when the rule is off or absent, even on an event turn', () => {
++    const base = primed(3, 'computeBoom');
++    const variants: GameState[] = [
++      { ...base, rules: { financing: false, fullStack: false, marketEvents: false } },
++      { ...base, rules: { financing: true, fullStack: true, marketEvents: false } },
++      { ...base, rules: undefined, market: undefined }, // an old save
++      { ...financed(base, 10, 1, 3), rules: { financing: true, fullStack: true, marketEvents: false }, turn: base.turn + 1 },
++    ];
++    for (const v of variants) {
++      const copy = structuredClone(v);
++      applyMarketEvents(copy);
++      expect(copy).toEqual(v);
++    }
++  });
++
++  it('never touch Classic seeded AI games', () => {
++    for (const seed of [4, 21]) {
++      const { s } = playAI(seed, undefined, undefined, (_before, after) => {
++        expect(after.market).toBeUndefined();
++        const copy = structuredClone(after);
++        applyMarketEvents(copy);
++        expect(copy).toEqual(after);
++      });
++      expect(s.phase).toBe('gameOver');
++      expect(s.log.some((l) => l.kind === 'event')).toBe(false);
++    }
++  });
++});
++
++describe('market events: timing', () => {
++  it('first fire in round 4 and then every 2–3 rounds, for 2–4 companies', () => {
++    const firsts = new Set<number>();
++    for (let seed = 1; seed <= 300; seed++) {
++      for (const n of [2, 3, 4]) {
++        const first = firstEventTurn(seed, n);
++        expect(first).toBeGreaterThan(3 * n);
++        expect(first).toBeLessThanOrEqual(4 * n);
++        expect(firstEventTurn(seed, n)).toBe(first); // deterministic
++        if (n === 4) firsts.add(first);
++        for (const turn of [first, 40, 77]) {
++          const gap = eventGap(seed, turn, n);
++          expect(gap).toBeGreaterThanOrEqual(2 * n);
++          expect(gap).toBeLessThanOrEqual(3 * n);
++        }
++      }
++    }
++    expect(firsts.size).toBe(4); // every seat of round 4 can open the event track
++  });
++
++  it('pick both events from the seed, roughly evenly', () => {
++    let crunch = 0;
++    for (let t = 1; t <= 1000; t++) if (seededEventType(77, t) === 'creditCrunch') crunch++;
++    expect(crunch).toBeGreaterThan(400);
++    expect(crunch).toBeLessThan(600);
++  });
++
++  it('fire on the seeded schedule in AI games: deterministic and infrequent', () => {
++    for (const seed of [2, 9, 13]) {
++      const a = playAI(seed, FLAGSHIP_EVENTS);
++      const b = playAI(seed, FLAGSHIP_EVENTS);
++      expect(b.eventTurns).toEqual(a.eventTurns);
++      expect(b.s.log.map((l) => l.text)).toEqual(a.s.log.map((l) => l.text));
++      const n = a.s.players.length;
++      // The schedule depends only on the seed and the turn number.
++      const expected: number[] = [];
++      for (let t = firstEventTurn(a.s.seed, n); t <= a.s.turn; t += eventGap(a.s.seed, t, n)) expected.push(t);
++      expect(a.eventTurns).toEqual(expected);
++      expect(a.eventTurns.length).toBeGreaterThan(0);
++      expect(a.eventTurns.length).toBeLessThanOrEqual(Math.ceil(a.s.turn / (2 * n)));
++    }
++  });
++
++  it('start lazily: a mid-game save with the rule on schedules ahead and does not fire at once', () => {
++    const s = { ...blankGame(8), rules: { ...EVENTS_ON }, turn: 30 };
++    const after = applyAction(s, END_TURN);
++    expect(after.market!.last).toBeNull();
++    expect(after.market!.nextEventTurn).toBeGreaterThanOrEqual(31 + 8);
++    const early = applyAction({ ...s, turn: 1 }, END_TURN);
++    expect(early.market).toEqual({ nextEventTurn: firstEventTurn(s.seed, 4), last: null });
++  });
++});
++
++describe('market events: dice and RNG', () => {
++  it('never consume the game RNG: END_TURN leaves it untouched and matches the events-off reducer', () => {
++    let fired = 0;
++    for (const seed of [5, 17]) {
++      const { eventTurns } = playAI(seed, FLAGSHIP_EVENTS, undefined, (before, after) => {
++        expect(after.rng).toBe(before.rng);
++        const off = applyAction({ ...before, rules: { ...before.rules!, marketEvents: false } }, END_TURN);
++        expect(after.rng).toBe(off.rng);
++        expect([after.turn, after.currentPlayer, after.phase]).toEqual([off.turn, off.currentPlayer, off.phase]);
++      });
++      fired += eventTurns.length;
++    }
++    expect(fired).toBeGreaterThan(0);
++  });
++
++  it('leave the dice identical for the same seed (AI games: every roll before the first event)', () => {
++    for (const seed of [1, 6, 30]) {
++      const on = playAI(seed, FLAGSHIP_EVENTS);
++      const off = playAI(seed, { financing: true, fullStack: true, marketEvents: false });
++      // One roll per turn: the rolls of turns 1..E, where the first event fired at the start of turn E.
++      const upTo = on.eventTurns[0];
++      expect(upTo).toBeGreaterThan(12);
++      expect(on.rolls.slice(0, upTo)).toEqual(off.rolls.slice(0, upTo));
++      // Later the games may part ways: events change hands, so the AI builds, plays cards and
++      // steals differently (a steal is an RNG draw). The dice stream itself is never touched.
++    }
++  });
++
++  it('leave the whole dice sequence identical when both games take the same actions', () => {
++    // Roll-and-pass with financed factories on the board; the disruption always moves to an
++    // empty hex, so the only RNG draws are dice. Events fire (and change hands) all game long.
++    const play = (marketEvents: boolean) => {
++      let s = blankGame(12);
++      s = { ...s, rules: { financing: true, fullStack: false, marketEvents } };
++      const occupied = new Set<number>();
++      // [owner, committed units]; 0 = a plain cluster. Sites follow the distance rule.
++      [[0, 1], [1, 2], [2, 1], [3, 0]].forEach(([owner, units]) => {
++        const v = legalSetupClusterVertices(s)[0];
++        s = units > 0 ? financed(s, v, owner, units) : place(s, v, owner, 'cluster');
++        for (const t of s.board.vertices[v].tileIds) occupied.add(t);
++      });
++      const empty = s.board.tiles.map((t) => t.id).filter((t) => !occupied.has(t));
++      const rolls: number[] = [];
++      let events = 0;
++      for (let i = 0; i < 120; i++) {
++        s = applyAction(s, END_TURN);
++        if (s.market?.last?.turn === s.turn) events++;
++        s = applyAction(s, { type: 'ROLL' });
++        rolls.push(s.lastRoll!.total);
++        while (s.phase === 'discard') {
++          const p = getActingPlayer(s)!;
++          s = applyAction(s, { type: 'DISCARD', resources: discardPick(s.players[p].resources, s.pendingDiscards[p]) });
++        }
++        if (s.phase === 'moveDisruption') {
++          const tile = empty.find((t) => t !== s.disruptionTile)!;
++          expect(disruptionVictims(s, tile, s.currentPlayer)).toEqual([]);
++          s = applyAction(s, { type: 'MOVE_DISRUPTION', tile, victim: null });
++        }
++      }
++      return { s, rolls, events };
++    };
++    const on = play(true);
++    const off = play(false);
++    expect(on.events).toBeGreaterThanOrEqual(8);
++    expect(off.events).toBe(0);
++    expect(on.rolls).toEqual(off.rolls);
++    expect(on.s.rng).toBe(off.s.rng);
++    expect(on.s.players.map((p) => p.resources)).not.toEqual(off.s.players.map((p) => p.resources));
++    expect(conservation(on.s)).toEqual(FULL);
++  });
++});
++
++function discardPick(hand: ResourceBundle, n: number): ResourceBundle {
++  const out = bundle();
++  for (let left = n; left > 0; left--) {
++    const r = RESOURCES.reduce((best, x) => (hand[x] - out[x] > hand[best] - out[best] ? x : best), RESOURCES[0]);
++    out[r]++;
++  }
++  return out;
++}
++
++describe('Credit Crunch', () => {
++  it('pays with Capital when it can, extends the commitment when it cannot, stops at the cap', () => {
++    let s = primed(5, 'creditCrunch');
++    s = place(s, 0, 0, 'factory'); // fully owned: unaffected even with no Capital
++    s = financed(s, 10, 1, 3);
++    s = setHand(s, 1, { capital: 2, land: 1 });
++    s = financed(s, 20, 2, 3);
++    s = setHand(s, 2, { power: 2, gpu: 1 });
++    s = financed(s, 30, 3, FINANCING_MAX_COMMITMENT);
++    const t = s.turn + 1;
++    const after = applyAction(deepFreeze(s), END_TURN);
++
++    expect(after.turn).toBe(t);
++    expect(after.players[1].resources).toEqual(bundle({ capital: 1, land: 1 }));
++    expect(after.bank.capital).toBe(s.bank.capital + 1);
++    expect(after.buildings[10]).toBe(s.buildings[10]); // paid: same terms, same object
++    expect(after.buildings[20]).toEqual({ owner: 2, kind: 'factory', financed: 4 });
++    expect(s.buildings[20]!.financed).toBe(3);
++    expect(after.players[2].resources).toEqual(s.players[2].resources); // never forced to pay
++    expect(after.buildings[30]).toBe(s.buildings[30]);
++    expect(after.buildings[0]).toBe(s.buildings[0]);
++    expect(after.players[0].resources).toEqual(s.players[0].resources);
++
++    expect(eventLines(after, s.nextLogId)).toEqual([
++      'Market event — Credit Crunch: lenders tighten terms on financed infrastructure.',
++      'Helixa Bio paid 1 Capital to keep its financing terms.',
++      "Ambulo Robotics' commitment grew to 4 units.",
++      `Stacksmith's commitment is already at the ${FINANCING_MAX_COMMITMENT}-unit ceiling: no change.`,
++    ]);
++    expect(after.market!.last).toEqual({
++      type: 'creditCrunch',
++      turn: t,
++      text: `Helixa Bio paid 1 Capital; Ambulo Robotics' commitment grew to 4 units; Stacksmith's commitment stays at the ${FINANCING_MAX_COMMITMENT}-unit ceiling.`,
++    });
++    expect(after.market!.nextEventTurn).toBe(t + eventGap(s.seed, t, 4));
++    expect(conservation(after)).toEqual(FULL);
++    for (let p = 0; p < 4; p++) expect(victoryPoints(after, p)).toBe(victoryPoints(s, p)); // never moves CP
++  });
++
++  it('charges per financed factory: one Capital covers one, the other is extended', () => {
++    let s = primed(6, 'creditCrunch');
++    s = financed(s, 10, 1, 3);
++    s = financed(s, 20, 1, 4);
++    s = setHand(s, 1, { capital: 1 });
++    s = financed(s, 30, 2, 3);
++    s = financed(s, 40, 2, 4);
++    const after = applyAction(deepFreeze(s), END_TURN);
++    expect(after.players[1].resources.capital).toBe(0);
++    expect(after.buildings[10]).toBe(s.buildings[10]);
++    expect(after.buildings[20]).toEqual({ owner: 1, kind: 'factory', financed: 5 });
++    expect([after.buildings[30]!.financed, after.buildings[40]!.financed]).toEqual([4, 5]);
++    expect(eventLines(after, s.nextLogId).slice(1)).toEqual([
++      'Helixa Bio paid 1 Capital to keep its financing terms.',
++      "Helixa Bio's commitment grew to 5 units.",
++      "Ambulo Robotics' commitments grew to 4 and 5 units.",
++    ]);
++    expect(noNegatives(after)).toBe(true);
++    expect(conservation(after)).toEqual(FULL);
++  });
++
++  it('gives way to a Compute Boom when nobody has financed infrastructure', () => {
++    let s = primed(7, 'creditCrunch');
++    s = place(s, 0, 0, 'factory');
++    const after = applyAction(s, END_TURN);
++    expect(after.market!.last!.type).toBe('computeBoom');
++    expect(after.players.every((p, i) => p.resources.gpu === s.players[i].resources.gpu + 1)).toBe(true);
++  });
++
++  it('keeps every commitment capped through repeated crunches', () => {
++    let s = financed(primed(9, 'creditCrunch'), 10, 1, 3);
++    let crunches = 0;
++    for (let i = 0; i < 200; i++) {
++      s = applyAction(s, END_TURN);
++      if (s.market!.last?.turn === s.turn && s.market!.last.type === 'creditCrunch') crunches++;
++      expect(s.buildings[10]!.financed).toBeLessThanOrEqual(FINANCING_MAX_COMMITMENT);
++      s = { ...s, phase: 'main' }; // skip the roll: nobody earns Capital
++    }
++    expect(crunches).toBeGreaterThanOrEqual(5);
++    expect(s.buildings[10]!.financed).toBe(FINANCING_MAX_COMMITMENT);
++    expect(s.buildings[10]).toEqual({ owner: 1, kind: 'factory', financed: FINANCING_MAX_COMMITMENT });
++  });
++});
++
++describe('Compute Boom', () => {
++  it('pays every company 1 GPU from the market', () => {
++    const s = primed(3, 'computeBoom');
++    const after = applyAction(deepFreeze(s), END_TURN);
++    expect(after.players.map((p) => p.resources.gpu)).toEqual([1, 1, 1, 1]);
++    expect(after.bank.gpu).toBe(15);
++    expect(eventLines(after, s.nextLogId)).toEqual([
++      `Market event — Compute Boom: ${MARKET_EVENT_INFO.computeBoom.blurb}`,
++      'Every company collects 1 GPU from the market.',
++    ]);
++    expect(after.market!.last).toEqual({ type: 'computeBoom', turn: s.turn + 1, text: 'Every company collects 1 GPU from the market.' });
++    expect(conservation(after)).toEqual(FULL);
++  });
++
++  it('applies the shortage rule: nobody collects when the market cannot pay everyone', () => {
++    const s = setHand(primed(3, 'computeBoom'), 0, { gpu: 16 }); // 3 left for 4 companies
++    const after = applyAction(deepFreeze(s), END_TURN);
++    expect(after.players.map((p) => p.resources)).toEqual(s.players.map((p) => p.resources));
++    expect(after.bank).toEqual(s.bank);
++    expect(after.market!.last!.text).toBe('The market is short of GPUs: nobody collects.');
++
++    const exact = applyAction(setHand(primed(3, 'computeBoom'), 0, { gpu: 15 }), END_TURN); // exactly 4 left
++    expect(exact.bank.gpu).toBe(0);
++    expect(exact.players.map((p) => p.resources.gpu)).toEqual([16, 1, 1, 1]);
++    expect(noNegatives(exact)).toBe(true);
++  });
++});
++
++describe('market events: state handling', () => {
++  it('never mutate the input state, its Buildings or its market record', () => {
++    for (const type of ['creditCrunch', 'computeBoom'] as const) {
++      let s = financed(primed(11, type), 10, 2, 4);
++      s = { ...s, market: { nextEventTurn: s.market!.nextEventTurn, last: { type: 'computeBoom', turn: 1, text: 'old' } } };
++      const snapshot = structuredClone(s);
++      const after = applyAction(deepFreeze(s), END_TURN);
++      expect(s).toEqual(snapshot);
++      expect(after.market).not.toBe(s.market);
++      expect(after.market!.last!.turn).toBe(s.turn + 1);
++    }
++  });
++
++  it('shows the last event for one round only', () => {
++    const s = applyAction(primed(3, 'computeBoom'), END_TURN);
++    expect(recentMarketEvent(s)).toEqual(s.market!.last);
++    expect(recentMarketEvent({ ...s, turn: s.turn + 3 })).not.toBeNull();
++    expect(recentMarketEvent({ ...s, turn: s.turn + 4 })).toBeNull();
++    expect(recentMarketEvent({ ...s, rules: undefined })).toBeNull();
++  });
++});
++
++describe('market events: full games', () => {
++  it('all-AI flagship games with events finish, conserve resources and never go negative', () => {
++    const counts: number[] = [];
++    for (const seed of [1, 2, 3, 4, 5, 6]) {
++      const { s, eventTurns } = playAI(seed, FLAGSHIP_EVENTS, undefined, (_before, after) => {
++        expect(conservation(after)).toEqual(FULL);
++        expect(noNegatives(after)).toBe(true);
++      });
++      expect(s.phase, `seed ${seed}`).toBe('gameOver');
++      expect(victoryPoints(s, s.winner!)).toBeGreaterThanOrEqual(10);
++      expect(conservation(s)).toEqual(FULL);
++      counts.push(eventTurns.length);
++    }
++    expect(Math.min(...counts)).toBeGreaterThan(0);
++  });
++
++  it('stay bounded when every company carries financed infrastructure all game', () => {
++    // Each company's first cluster becomes a financed factory: Credit Crunch is always live.
++    const leverage = (s: GameState): GameState => {
++      const buildings = s.buildings.slice();
++      for (let p = 0; p < s.players.length; p++) {
++        const v = buildings.findIndex((b) => b?.owner === p && b.kind === 'cluster');
++        buildings[v] = { owner: p, kind: 'factory', financed: 3 };
++      }
++      return { ...s, buildings };
++    };
++    const types: MarketEventType[] = [];
++    for (const seed of [7, 8, 9, 10]) {
++      const played = playAI(seed, FLAGSHIP_EVENTS, leverage, (_before, after) => {
++        expect(conservation(after)).toEqual(FULL);
++        expect(noNegatives(after)).toBe(true);
++        for (const b of after.buildings) if (b?.financed !== undefined) expect(b.financed).toBeLessThanOrEqual(FINANCING_MAX_COMMITMENT);
++      });
++      expect(played.s.phase, `seed ${seed}`).toBe('gameOver');
++      types.push(...played.types);
++    }
++    expect(types).toContain('creditCrunch');
++    expect(types).toContain('computeBoom');
++  });
++});
+diff --git a/src/engine/events.ts b/src/engine/events.ts
+index 96faacf..c71e065 100644
+--- a/src/engine/events.ts
++++ b/src/engine/events.ts
+@@ -1,12 +1,168 @@
+-import type { GameState } from './types';
++import { FINANCING_MAX_COMMITMENT, bundle, rulesOf } from './constants';
++import { isFinanced } from './financing';
++import { addLog, gainFromBank, nameOf, pay } from './mutate';
++import { Rng, deriveSeed } from './rng';
++import type { GameState, MarketEvent, MarketEventType } from './types';
+ 
+ // Market events (experimental, rules.marketEvents; off by default and in Classic Mode).
+ //
+-// OWNER: Market events agent. Stub to implement.
++// Guardrails (owner's directive): infrequent, resolved automatically (no new phase, no prompt),
++// never a bankruptcy or an elimination, never a payment a company cannot make, and every
++// commitment stays capped at FINANCING_MAX_COMMITMENT. Timing and the choice of event are
++// derived from the game seed and the turn number with `deriveSeed`, never from the game RNG,
++// so switching events on never changes a single die.
++
++/** Player-facing names and one-line explanations, shared by the log and the UI banner. */
++export const MARKET_EVENT_INFO: Record<MarketEventType, { title: string; blurb: string; tone: 'positive' | 'negative' }> = {
++  creditCrunch: {
++    title: 'Credit Crunch',
++    blurb: 'lenders tighten terms on financed infrastructure.',
++    tone: 'negative',
++  },
++  computeBoom: {
++    title: 'Compute Boom',
++    blurb: 'new capacity comes online and every company gets a share.',
++    tone: 'positive',
++  },
++};
++
++/** The first event lands somewhere in round 4 (never earlier: the opening stays pure Catan). */
++const FIRST_EVENT_ROUND = 4;
++/** Later events follow every 2–3 rounds. */
++const MIN_GAP_ROUNDS = 2;
++const MAX_GAP_ROUNDS = 3;
++/** Salt for every market-event draw ('mkt'); far from the small salts game.ts uses for boards and dice. */
++const MARKET_SALT = 0x6d6b7400;
++
++/** Throwaway generator for one decision, derived from the seed and the turn. Never touches `s.rng`. */
++function drawFor(seed: number, turn: number): Rng {
++  return new Rng(deriveSeed(seed, MARKET_SALT + turn));
++}
++
++/** Global turn of the first event: a seed-chosen turn of round 4. */
++export function firstEventTurn(seed: number, players: number): number {
++  return (FIRST_EVENT_ROUND - 1) * players + 1 + drawFor(seed, 0).int(players);
++}
++
++/** The event the seed calls for on `turn` (a coin flip), before the relevance check in pickEvent. */
++export function seededEventType(seed: number, turn: number): MarketEventType {
++  return drawFor(seed, turn).int(2) === 0 ? 'creditCrunch' : 'computeBoom';
++}
++
++/** Turns between the event that fired on `turn` and the next one: 2–3 rounds, chosen by the seed. */
++export function eventGap(seed: number, turn: number, players: number): number {
++  const r = drawFor(seed, turn);
++  r.next(); // the first draw is the coin flip in seededEventType
++  return MIN_GAP_ROUNDS * players + r.int((MAX_GAP_ROUNDS - MIN_GAP_ROUNDS) * players + 1);
++}
++
++/**
++ * Which event fires on `turn`. Credit Crunch only bites leveraged companies, so with no financed
++ * factory on the board the boom fires instead and every scheduled event does something.
++ */
++function pickEvent(s: GameState, turn: number): MarketEventType {
++  const wanted = seededEventType(s.seed, turn);
++  return wanted === 'creditCrunch' && !s.buildings.some((b) => isFinanced(b)) ? 'computeBoom' : wanted;
++}
++
++/** "Helixa Bio's" / "Ambulo Robotics'" (an all-caps custom name such as "AWS" keeps "'s"). */
++function possessive(name: string): string {
++  return /s$/.test(name) ? `${name}'` : `${name}'s`;
++}
++
++function listNames(names: string[]): string {
++  if (names.length <= 1) return names.join('');
++  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
++}
++
++/**
++ * Credit Crunch: each outstanding financed factory costs its owner 1 Capital (paid to the market)
++ * to keep its terms. An owner with no Capital is never forced to pay: that factory's commitment
++ * grows by 1 instead, up to FINANCING_MAX_COMMITMENT (already at the ceiling: no effect).
++ * Fully owned factories are untouched. Returns the one-line summary for the banner.
++ */
++function creditCrunch(s: GameState): string {
++  const paid = s.players.map(() => 0);
++  const grew: number[][] = s.players.map(() => []);
++  const capped = s.players.map(() => 0);
++  s.buildings.forEach((b, v) => {
++    if (!b || !isFinanced(b)) return;
++    const owner = b.owner;
++    if (s.players[owner].resources.capital >= 1) {
++      pay(s, owner, bundle({ capital: 1 }));
++      paid[owner]++;
++    } else if (b.financed! < FINANCING_MAX_COMMITMENT) {
++      const financed = b.financed! + 1;
++      s.buildings[v] = { ...b, financed }; // a new Building: they are shared between states
++      grew[owner].push(financed);
++    } else {
++      capped[owner]++;
++    }
++  });
++
++  const parts: string[] = [];
++  s.players.forEach((_, i) => {
++    const name = nameOf(s, i);
++    if (paid[i] > 0) {
++      addLog(s, 'event', i, `${name} paid ${paid[i]} Capital to keep its financing terms.`);
++      parts.push(`${name} paid ${paid[i]} Capital`);
++    }
++    if (grew[i].length > 0) {
++      const units = listNames(grew[i].map(String));
++      const what = grew[i].length === 1 ? 'commitment' : 'commitments';
++      addLog(s, 'event', i, `${possessive(name)} ${what} grew to ${units} units.`);
++      parts.push(`${possessive(name)} ${what} grew to ${units} units`);
++    }
++    if (capped[i] > 0) {
++      addLog(s, 'event', i, `${possessive(name)} commitment is already at the ${FINANCING_MAX_COMMITMENT}-unit ceiling: no change.`);
++      parts.push(`${possessive(name)} commitment stays at the ${FINANCING_MAX_COMMITMENT}-unit ceiling`);
++    }
++  });
++  return `${parts.join('; ')}.`;
++}
++
++/**
++ * Compute Boom: every company collects 1 GPU from the market. The familiar shortage rule
++ * applies: if the market cannot pay everyone, nobody collects (every company is owed, so the
++ * sole-claimant exception never arises). Returns the one-line summary for the banner.
++ */
++function computeBoom(s: GameState): string {
++  const paysAll = s.bank.gpu >= s.players.length;
++  if (paysAll) s.players.forEach((p) => gainFromBank(s, p.id, bundle({ gpu: 1 })));
++  const text = paysAll ? 'Every company collects 1 GPU from the market.' : 'The market is short of GPUs: nobody collects.';
++  addLog(s, 'event', null, text);
++  return text;
++}
+ 
+ /**
+  * Called by the reducer at the start of every turn (END_TURN, after the new current player is set,
+  * before the victory check). `s` is already cloned. Must be a no-op unless rules.marketEvents is on,
+  * and must not consume the game RNG (`s.rng`), so enabling events never changes the dice.
++ *
++ * `s.market` is shared with the previous state by the shallow clone, so it is always replaced,
++ * never edited. Neither event changes anyone's Compute Points.
+  */
+-export function applyMarketEvents(_s: GameState): void {}
++export function applyMarketEvents(s: GameState): void {
++  if (!rulesOf(s).marketEvents) return;
++  const players = s.players.length;
++  if (!s.market) {
++    // Lazy start (also covers a save made before the rule existed): round 4 at the earliest.
++    const first = firstEventTurn(s.seed, players);
++    s.market = { nextEventTurn: s.turn < first ? first : s.turn + eventGap(s.seed, s.turn, players), last: null };
++  }
++  if (s.turn < s.market.nextEventTurn) return;
++
++  const type = pickEvent(s, s.turn);
++  const info = MARKET_EVENT_INFO[type];
++  addLog(s, 'event', null, `Market event — ${info.title}: ${info.blurb}`);
++  const text = type === 'creditCrunch' ? creditCrunch(s) : computeBoom(s);
++  const last: MarketEvent = { type, turn: s.turn, text };
++  s.market = { nextEventTurn: s.turn + eventGap(s.seed, s.turn, players), last };
++}
++
++/** The last market event if it fired within the current round (what the UI banner shows), else null. */
++export function recentMarketEvent(state: GameState): MarketEvent | null {
++  const last = state.market?.last;
++  if (!last || !rulesOf(state).marketEvents) return null;
++  return state.turn - last.turn < state.players.length ? last : null;
++}
+diff --git a/src/ui/MarketEventBanner.tsx b/src/ui/MarketEventBanner.tsx
+new file mode 100644
+index 0000000..1498b64
+--- /dev/null
++++ b/src/ui/MarketEventBanner.tsx
+@@ -0,0 +1,66 @@
++import { useState } from 'react';
++import { MARKET_EVENT_INFO, recentMarketEvent } from '../engine/events';
++import type { GameState } from '../engine/types';
++
++// Market event card (experimental rules.marketEvents). Small, non-blocking and dismissible: it
++// shows the last market event for one round after it fired, then hides itself. Styles live in
++// styles/events.css. It floats over the top of a positioned parent (the desktop board column and
++// the mobile board area both are) and renders nothing when events are off.
++
++function TrendGlyph({ up }: { up: boolean }) {
++  return (
++    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className="market-event-glyph">
++      <polyline
++        points={up ? '1.5,12 6,7.5 9,10 14.5,4' : '1.5,4 6,8.5 9,6 14.5,12'}
++        fill="none"
++        stroke="currentColor"
++        strokeWidth="1.8"
++        strokeLinecap="round"
++        strokeLinejoin="round"
++      />
++      <polyline
++        points={up ? '10.5,4 14.5,4 14.5,8' : '10.5,12 14.5,12 14.5,8'}
++        fill="none"
++        stroke="currentColor"
++        strokeWidth="1.8"
++        strokeLinecap="round"
++        strokeLinejoin="round"
++      />
++    </svg>
++  );
++}
++
++export function MarketEventBanner({ state, onDismiss }: { state: GameState; onDismiss?: () => void }) {
++  const [dismissed, setDismissed] = useState<string | null>(null);
++  const event = recentMarketEvent(state);
++  if (!event || state.phase === 'gameOver') return null;
++  // Keyed by game and turn, so the next event (or a new game) shows again after a dismissal.
++  const key = `${state.seed}:${event.turn}`;
++  if (dismissed === key) return null;
++  const info = MARKET_EVENT_INFO[event.type];
++  const blurb = info.blurb.charAt(0).toUpperCase() + info.blurb.slice(1);
++  return (
++    <aside className={`market-event ${info.tone}`} role="status" aria-live="polite" aria-label={`Market event: ${info.title}`}>
++      <span className="market-event-icon">
++        <TrendGlyph up={info.tone === 'positive'} />
++      </span>
++      <div className="market-event-body">
++        <span className="market-event-label">Market event</span>
++        <p className="market-event-head">
++          <strong>{info.title}</strong> <span className="market-event-blurb">{blurb}</span>
++        </p>
++        <p className="market-event-effect">{event.text}</p>
++      </div>
++      <button
++        className="icon-btn market-event-close"
++        onClick={() => {
++          setDismissed(key);
++          onDismiss?.();
++        }}
++        aria-label="Dismiss market event"
++      >
++        ✕
++      </button>
++    </aside>
++  );
++}
+diff --git a/src/ui/styles/events.css b/src/ui/styles/events.css
+index 2ac3301..268f6ff 100644
+--- a/src/ui/styles/events.css
++++ b/src/ui/styles/events.css
+@@ -1 +1,125 @@
+ /* events.css — owned by the events work stream. Loaded after styles.css. */
++
++/* ---------- Market event card (MarketEventBanner, experimental rules.marketEvents) ----------
++   Floats over the top of its positioned parent: below the instruction pill in the desktop board
++   column, at the top of the board area on phones. Never blocks the board beyond its own box. */
++.market-event {
++  --tone: var(--accent);
++  position: absolute;
++  top: 52px;
++  left: 50%;
++  transform: translateX(-50%);
++  z-index: 3;
++  width: min(440px, calc(100% - 16px));
++  display: flex;
++  align-items: flex-start;
++  gap: 10px;
++  padding: 10px 8px 10px 12px;
++  border-radius: 12px;
++  border: 1px solid color-mix(in srgb, var(--tone) 45%, var(--border-strong));
++  border-left: 3px solid var(--tone);
++  background: rgba(8, 13, 28, 0.93);
++  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 0 22px color-mix(in srgb, var(--tone) 14%, transparent);
++  backdrop-filter: blur(8px);
++  animation: marketEventIn 0.32s ease;
++}
++.market-event.negative {
++  --tone: var(--warn);
++}
++.market-event.positive {
++  --tone: var(--ok);
++}
++
++.market-event-icon {
++  flex: none;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  width: 28px;
++  height: 28px;
++  margin-top: 2px;
++  border-radius: 8px;
++  color: var(--tone);
++  background: color-mix(in srgb, var(--tone) 14%, transparent);
++  border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent);
++}
++
++.market-event-body {
++  flex: 1;
++  min-width: 0;
++  display: grid;
++  gap: 2px;
++}
++.market-event-label {
++  font-size: 10px;
++  font-weight: 700;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  color: var(--tone);
++}
++.market-event-head,
++.market-event-effect {
++  margin: 0;
++  overflow-wrap: anywhere;
++}
++.market-event-head {
++  font-size: 13px;
++  line-height: 1.3;
++}
++.market-event-head strong {
++  font-family: var(--display);
++  font-size: 14px;
++  color: var(--text);
++}
++.market-event-blurb {
++  color: var(--muted);
++}
++.market-event-effect {
++  font-size: 12.5px;
++  line-height: 1.35;
++  color: #cbd5e1;
++}
++
++.market-event-close {
++  flex: none;
++  width: 28px;
++  height: 28px;
++  font-size: 12px;
++  color: var(--muted);
++}
++.market-event-close:hover {
++  color: var(--text);
++}
++
++@keyframes marketEventIn {
++  from {
++    opacity: 0;
++    transform: translate(-50%, -6px);
++  }
++  to {
++    opacity: 1;
++    transform: translate(-50%, 0);
++  }
++}
++
++/* Phones: top of the board area (the instruction strip sits above it), bigger tap target. */
++.m-board .market-event {
++  top: 8px;
++  padding: 8px 6px 8px 10px;
++}
++.m-board .market-event-close {
++  width: 36px;
++  height: 36px;
++}
++.m-board .market-event-head {
++  font-size: 12.5px;
++}
++.m-board .market-event-effect {
++  font-size: 12px;
++}
++
++@media (prefers-reduced-motion: reduce) {
++  .market-event {
++    animation: none;
++  }
++}
+-- 
+2.43.0
+

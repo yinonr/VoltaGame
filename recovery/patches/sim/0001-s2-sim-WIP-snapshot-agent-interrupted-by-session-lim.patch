@@ -1,0 +1,1752 @@
+From 4ec2226c6edd079cc04e241a22c1baa513605368 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 11 Oct 2026 05:16:27 +0000
+Subject: [PATCH] s2/sim: WIP snapshot (agent interrupted by session limit;
+ unverified)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01P9tr9NPSVt39359TmWrAhk
+---
+ src/engine/__tests__/simulate.test.ts |  275 +++++
+ src/sim/simulate.ts                   | 1447 +++++++++++++++++++++++++
+ 2 files changed, 1722 insertions(+)
+ create mode 100644 src/engine/__tests__/simulate.test.ts
+ create mode 100644 src/sim/simulate.ts
+
+diff --git a/src/engine/__tests__/simulate.test.ts b/src/engine/__tests__/simulate.test.ts
+new file mode 100644
+index 0000000..e3bab70
+--- /dev/null
++++ b/src/engine/__tests__/simulate.test.ts
+@@ -0,0 +1,275 @@
++import { describe, expect, it } from 'vitest';
++import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
++import { join, resolve } from 'node:path';
++import { decideAIAction } from '../ai';
++import { bundle } from '../constants';
++import { isFinanced } from '../financing';
++import { applyAction, createGame, getActingPlayer } from '../game';
++import {
++  SIM_CONFIG_NAMES,
++  aggregate,
++  compareTo,
++  formatMarkdown,
++  isSimConfigName,
++  runBatch,
++  runGame,
++  simSeats,
++} from '../../sim/simulate';
++import type { GameMetrics, SimConfigName, SimSummary } from '../../sim/simulate';
++import type { Action, Delivery, GameState } from '../types';
++import { ALL_AI, setHand } from './helpers';
++
++// Balance simulation harness (src/sim/simulate.ts).
++// - Always on: a fast smoke test so the harness cannot rot.
++// - Gated: `SIM=1 npx vitest run src/engine/__tests__/simulate.test.ts` plays full batches and writes
++//   JSON + a markdown report. See docs/BALANCE.md for the variables and the reproduction commands.
++
++describe('simulation harness', () => {
++  it('plays every config to decided, legal, conserved games and summarizes them', () => {
++    for (const name of SIM_CONFIG_NAMES) {
++      const games = runBatch({ config: name, games: 3, seed: 31000 });
++      for (const g of games) {
++        const where = `${name} seed ${g.seed}`;
++        expect(g.status, where).toBe('won');
++        expect(g.illegal, where).toBeNull();
++        expect(g.stalled, where).toBe(false);
++        expect(g.invariantViolations, where).toEqual([]); // conservation + input immutability, every action
++        expect(g.companies[g.winner!.seat].cp, where).toBeGreaterThanOrEqual(10);
++        expect(g.rounds).toBe(Math.ceil(g.turns / 4));
++      }
++      const sum = aggregate(games);
++      expect(sum.config).toBe(name);
++      expect(sum.games).toBe(3);
++      expect(sum.decided + sum.stalls + sum.aborts).toBe(3);
++      expect(sum.winsByCompany.reduce((n, r) => n + r.wins, 0)).toBe(sum.decided);
++      expect(sum.winsBySeat).toHaveLength(4);
++      expect(sum.length.turns.n).toBe(sum.decided);
++      expect(sum.length.turns.p10).toBeLessThanOrEqual(sum.length.turns.p90);
++      expect(sum.profile.bySpecialization.reduce((n, r) => n + r.n, 0)).toBe(sum.decided * 4);
++      expect(sum.financing.financers.n + sum.financing.nonFinancers.n).toBe(sum.decided * 4);
++      expect(sum.fullStack.unlockers.n + sum.fullStack.nonUnlockers.n).toBe(sum.decided * 4);
++    }
++  });
++
++  it('is deterministic and observes the game without changing it', () => {
++    const a = runGame({ seed: 55 });
++    const b = runGame({ seed: 55 });
++    expect(a).toEqual(b);
++    // The same game played by a bare loop (as ai-demo.test.ts does) ends identically.
++    let s = createGame({ seed: 55, seats: ALL_AI });
++    let steps = 0;
++    while (s.phase !== 'gameOver') {
++      s = applyAction(s, decideAIAction(s, getActingPlayer(s)!));
++      steps++;
++    }
++    expect(a.steps).toBe(steps);
++    expect(a.turns).toBe(s.turn);
++    expect(a.winner?.seat).toBe(s.winner);
++  });
++
++  it('seats companies in default order, or rotated, for 2–4 players', () => {
++    expect(simSeats(4).map((x) => x.companyId)).toEqual(['parallax', 'helixa', 'ambulo', 'stacksmith']);
++    expect(simSeats(3, 1).map((x) => x.companyId)).toEqual(['helixa', 'ambulo', 'stacksmith']);
++    expect(simSeats(2, 3).map((x) => x.companyId)).toEqual(['stacksmith', 'parallax']);
++    expect(simSeats(4).every((x) => x.isAI)).toBe(true);
++    const two = runBatch({ config: 'classic', games: 1, seed: 31000, players: 2 })[0];
++    expect(two.players).toBe(2);
++    expect(two.rounds).toBe(Math.ceil(two.turns / 2));
++  });
++
++  it('tracks financed factories and Full-Stack unlocks it is handed', () => {
++    // The engine stubs never create these yet, so plant them: a financed factory and an unlock.
++    let s = createGame({ seed: 77, seats: ALL_AI });
++    const v = s.buildings.findIndex((b) => b?.owner === 2 && b.kind === 'cluster');
++    const buildings = s.buildings.slice();
++    buildings[v] = { owner: 2, kind: 'factory', financed: 3 };
++    s = { ...s, buildings, players: s.players.map((p) => (p.id === 1 ? { ...p, fullStackTurn: 1 } : p)) };
++    const m = runGame({ seed: 77, from: s, config: 'planted' });
++    expect(m.status).toBe('won');
++    expect(m.financing).toHaveLength(1);
++    expect(m.financing[0]).toMatchObject({ owner: 2, vertex: v, commitment: 3, turnFinanced: 1, roundFinanced: 1 });
++    expect(m.companies[2].maxOutstandingFinancing).toBe(1);
++    expect(m.companies[1].fullStack).toMatchObject({ turn: 1, round: 1 });
++    const sum = aggregate([m]);
++    expect(sum.financing.records).toBe(1);
++    expect(sum.fullStack.unlocks).toBe(1);
++    expect(formatMarkdown([sum])).toContain('Grid Disruption 7s');
++  });
++
++  it('measures commitment completion, refinancing and outage blocks (stand-in financing engine)', () => {
++    // financing.ts is still a stub here, so the test plays its part through the runner's hooks:
++    // company 2's two opening clusters start as financed factories owing 3 units; each payout of
++    // their hexes delivers one unit; the second one is refinanced on its owner's first turn.
++    const owner = 2;
++    let s = createGame({ seed: 77, seats: ALL_AI });
++    s = setHand(s, owner, { ...s.players[owner].resources, capital: s.players[owner].resources.capital + 3 });
++    const [early, refi] = s.buildings.map((b, v) => (b?.owner === owner ? v : -1)).filter((v) => v >= 0);
++    const buildings = s.buildings.slice();
++    for (const v of [early, refi]) buildings[v] = { owner, kind: 'factory', financed: 3 };
++    // Start the outage on the first one's 9 hex (seed 77 rolls a 9 on turn 3, before the first 7).
++    const nine = s.board.vertices[early].tileIds.find((t) => s.board.tiles[t].number === 9)!;
++    s = { ...s, buildings, disruptionTile: nine };
++    const decide = (st: GameState, p: number): Action => {
++      const b = st.buildings[refi];
++      if (p === owner && st.currentPlayer === p && st.phase === 'main' && !st.pendingTrade && isFinanced(b) && st.players[p].resources.capital >= b!.financed!) {
++        return { type: 'REFINANCE', vertex: refi };
++      }
++      return decideAIAction(st, p);
++    };
++    let blocked = 0; // independent count of outage-blocked payouts while a commitment is open
++    const apply = (st: GameState, a: Action): GameState => {
++      if (a.type === 'REFINANCE') {
++        const owed = st.buildings[a.vertex]!.financed!;
++        const paid = setHand(st, owner, { ...st.players[owner].resources, capital: st.players[owner].resources.capital - owed });
++        const bs = paid.buildings.slice();
++        bs[a.vertex] = { owner, kind: 'factory' };
++        return { ...paid, buildings: bs };
++      }
++      const next = applyAction(st, a);
++      const report = next.lastProduction;
++      if (a.type !== 'ROLL' || !report) return next;
++      const bs = next.buildings.slice();
++      const deliveries: Delivery[] = [];
++      for (const v of [early, refi]) {
++        for (const t of next.board.vertices[v].tileIds) {
++          const tile = next.board.tiles[t];
++          const b = bs[v]!;
++          if (!isFinanced(b) || tile.number !== report.roll || tile.type === 'barren') continue;
++          if (t === report.blockedTileId) {
++            blocked++;
++            continue;
++          }
++          const left = b.financed! - 1;
++          bs[v] = left > 0 ? { ...b, financed: left } : { owner, kind: 'factory' };
++          deliveries.push({ player: owner, vertex: v, resource: tile.type, left });
++        }
++      }
++      return { ...next, buildings: bs, lastProduction: { ...report, deliveries } };
++    };
++    const m = runGame({ seed: 77, from: s, decide, apply, config: 'stand-in' });
++    expect(m.status).toBe('won');
++    expect(m.invariantViolations).toEqual([]);
++    const [a, b] = [early, refi].map((v) => m.financing.find((r) => r.vertex === v)!);
++    expect(a).toMatchObject({ status: 'completed', deliveries: 3, refinanceCapital: 0 });
++    expect(a.roundsToResolve).toBe((a.turnCompleted! - 1) / 4);
++    expect(b.status).toBe('refinanced');
++    expect(b.unitsRefinanced).toBe(3 - b.deliveries);
++    expect(b.refinanceCapital).toBe(b.unitsRefinanced);
++    expect(a.blockedRolls + b.blockedRolls).toBe(blocked);
++    expect(blocked).toBeGreaterThan(0);
++    expect(m.companies[owner]).toMatchObject({ refinances: 1, refinanceCapital: b.refinanceCapital, maxOutstandingFinancing: 2, outstandingAtEnd: 0 });
++    const sum = aggregate([m]);
++    expect(sum.financing).toMatchObject({ records: 2, completed: 1, refinanced: 1, outstandingAtEnd: 0, refinanceShare: 0.5 });
++    expect(sum.financing.maxOutstanding).toMatchObject({ '2': 1 });
++  });
++
++  it('ends a game as aborted, not hidden, when the AI makes an illegal move, and as stalled at a cap', () => {
++    // Player 0 offers 3 GPUs it does not hold: the reducer rejects the AI's acceptance.
++    let s = createGame({ seed: 12, seats: ALL_AI });
++    s = setHand(setHand(s, 0, {}), 1, { land: 2 });
++    s = { ...s, phase: 'main', pendingTrade: { from: 0, to: 1, give: bundle({ gpu: 3 }), get: bundle({ land: 1 }) } };
++    expect(decideAIAction(s, 1)).toMatchObject({ type: 'RESPOND_TRADE', accept: true });
++    const bad = runGame({ seed: 12, from: s, config: 'classic' });
++    expect(bad.status).toBe('aborted');
++    expect(bad.illegal).toMatchObject({ actionType: 'RESPOND_TRADE', error: 'GameError', companyId: 'helixa' });
++    expect(bad.winner).toBeNull();
++
++    const capped = runGame({ seed: 12, maxTurns: 6, config: 'classic' });
++    expect(capped).toMatchObject({ status: 'stalled', stalled: true, stallReason: 'maxTurns', winner: null });
++
++    const sum = aggregate([bad, capped, runGame({ seed: 13, config: 'classic' })]);
++    expect(sum).toMatchObject({ aborts: 1, stalls: 1, decided: 1 });
++    expect(sum.illegal.byKind).toEqual({ 'RESPOND_TRADE: One side can no longer cover this trade.': 1 });
++    expect(formatMarkdown([sum])).toContain('One side can no longer cover this trade.');
++  });
++
++  it('formats side-by-side reports and baseline comparisons', () => {
++    const a = aggregate(runBatch({ config: 'classic', games: 2, seed: 31000 }));
++    const b = aggregate(runBatch({ config: 'volta', games: 2, seed: 31000 }));
++    const md = formatMarkdown({ classic: a, volta: b }, 'Smoke');
++    expect(md).toContain('## Smoke');
++    expect(md).toContain('| Length, turns |');
++    expect(md).toContain('classic 4p');
++    expect(md).toContain('Expedited Deployment');
++    const cmp = compareTo(a, b);
++    expect(cmp).toContain('volta 4p vs classic 4p');
++    expect(cmp).toContain('Length, turns (mean)');
++  });
++});
++
++// ---------------------------------------------------------------------------
++// Gated batch run (SIM=1). Never runs in the normal test suite.
++// ---------------------------------------------------------------------------
++
++const DEFAULT_OUT = '/tmp/claude-0/-home-user-VoltaGame/d03e2b9c-8db7-55f9-afb7-3aba694ce90c/scratchpad/sim';
++
++function envList(name: string, fallback: string): string[] {
++  return (process.env[name] || fallback)
++    .split(',')
++    .map((x) => x.trim())
++    .filter(Boolean);
++}
++
++function envInt(name: string, fallback: number): number {
++  const raw = process.env[name];
++  if (!raw) return fallback;
++  const n = Number(raw);
++  if (!Number.isInteger(n) || n < 0) throw new Error(`${name} must be a non-negative integer, got "${raw}".`);
++  return n;
++}
++
++describe.runIf(process.env.SIM)('balance simulation (SIM=1)', () => {
++  it(
++    'plays the requested batches and writes per-config JSON and a markdown report',
++    () => {
++      const configs = envList('SIM_CONFIGS', 'classic').flatMap((c) => (c === 'all' ? SIM_CONFIG_NAMES : [c]));
++      for (const c of configs) if (!isSimConfigName(c)) throw new Error(`Unknown SIM_CONFIGS entry "${c}". Use: ${SIM_CONFIG_NAMES.join(', ')}, all.`);
++      const games = envInt('SIM_GAMES', 200);
++      const seed = envInt('SIM_SEED', 20000);
++      const playerCounts = envList('SIM_PLAYERS', '4').map(Number);
++      const rotate = !!process.env.SIM_ROTATE && process.env.SIM_ROTATE !== '0';
++      const out = resolve(process.env.SIM_OUT || DEFAULT_OUT);
++      if (out === process.cwd() || out.startsWith(process.cwd() + '/')) throw new Error(`SIM_OUT must be outside the repository (${out}).`);
++      mkdirSync(out, { recursive: true });
++
++      const summaries: SimSummary[] = [];
++      const timing: string[] = [];
++      for (const players of playerCounts) {
++        for (const name of configs as SimConfigName[]) {
++          const t0 = performance.now();
++          const metrics: GameMetrics[] = runBatch({ config: name, games, seed, players, rotateSeats: rotate });
++          const ms = performance.now() - t0;
++          const summary = aggregate(metrics);
++          summaries.push(summary);
++          const gps = games / (ms / 1000);
++          timing.push(`- ${name} ${players}p${rotate ? ' rot' : ''}: ${games} games in ${(ms / 1000).toFixed(1)} s (${gps.toFixed(1)} games/s)`);
++          const file = join(out, `${name}-${players}p-${games}g-s${seed}${rotate ? '-rot' : ''}.json`);
++          writeFileSync(file, JSON.stringify({ config: name, players, games, seed, rotated: rotate, timing: { ms, gamesPerSecond: gps }, summary, metrics }));
++          process.stdout.write(`wrote ${file}\n`);
++        }
++      }
++
++      const sections = [
++        formatMarkdown(summaries, `Simulation: ${configs.join(', ')} · ${playerCounts.join('/')} players · ${games} games from seed ${seed}${rotate ? ' · rotated seats' : ''}`),
++        '### Throughput',
++        '',
++        ...timing,
++        '',
++      ];
++      const baselinePath = process.env.SIM_BASELINE;
++      const baseline: SimSummary | undefined = baselinePath ? (JSON.parse(readFileSync(baselinePath, 'utf8')) as { summary: SimSummary }).summary : undefined;
++      const comparisons = summaries.flatMap((s) => {
++        const base = baseline ?? summaries.find((x) => x.config === 'classic' && x.players === s.players);
++        return base && base !== s ? [compareTo(base, s)] : [];
++      });
++      if (comparisons.length > 0) sections.push('### Comparisons', '', ...comparisons);
++      const report = sections.join('\n');
++      const reportFile = join(out, `report-${configs.join('_')}-${playerCounts.join('_')}p-${games}g-s${seed}${rotate ? '-rot' : ''}.md`);
++      writeFileSync(reportFile, report);
++      // process.stdout (not console.log) so the report shows without --silent=false.
++      process.stdout.write(`${report}\nwrote ${reportFile}\n`);
++      expect(summaries.every((s) => s.games === games)).toBe(true);
++    },
++    30 * 60 * 1000,
++  );
++});
+diff --git a/src/sim/simulate.ts b/src/sim/simulate.ts
+new file mode 100644
+index 0000000..650c6cf
+--- /dev/null
++++ b/src/sim/simulate.ts
+@@ -0,0 +1,1447 @@
++import { decideAIAction } from '../engine/ai';
++import { BANK_SUPPLY_PER_RESOURCE, COMPUTE_RULES, DEV_DECK_COMPOSITION, VP_TO_WIN, rulesOf, sumBundle } from '../engine/constants';
++import { productionPips } from '../engine/evaluation';
++import { isFinanced } from '../engine/financing';
++import { GameError, applyAction, createGame, getActingPlayer } from '../engine/game';
++import type { SeatConfig } from '../engine/game';
++import { scoreBreakdown } from '../engine/scoring';
++import type { Action, ActionType, DevCardType, GameState, MarketEventType, Phase, Resource, RuleOptions } from '../engine/types';
++import { RESOURCES } from '../engine/types';
++
++// Balance simulation harness. Plays AI-only seeded games exactly like the engine tests do
++// (decideAIAction → applyAction until gameOver) and observes every action and state from the
++// outside: nothing here changes the engine, the RNG or the AI. Same seed + same config = the same
++// metrics, so runs are reproducible and configs can be compared on identical seeds.
++//
++// Financing / Full-Stack / market-event metrics are written against docs/SESSION2_CONTRACTS.md
++// (Building.financed, Player.fullStackTurn, ProductionReport.deliveries, GameState.market and the
++// BUILD_FINANCED_FACTORY / REFINANCE / BUILD_INTEGRATED_FACTORY actions); they read zero until the
++// engine implements those rules and the AI uses them.
++
++// ---------------------------------------------------------------------------
++// Configs and seats
++// ---------------------------------------------------------------------------
++
++export type SimConfigName = 'classic' | 'financing' | 'fullstack' | 'compute' | 'events' | 'volta' | 'compute+volta';
++
++export interface SimConfig {
++  name: SimConfigName;
++  label: string;
++  /** Rules variant passed to createGame (absent = Classic). */
++  rules?: Partial<RuleOptions>;
++  voltaCards?: boolean;
++}
++
++export const SIM_CONFIGS: Record<SimConfigName, SimConfig> = {
++  classic: { name: 'classic', label: 'Classic' },
++  financing: { name: 'financing', label: 'Financing only', rules: { financing: true } },
++  fullstack: { name: 'fullstack', label: 'Full-Stack only', rules: { fullStack: true } },
++  compute: { name: 'compute', label: 'Compute rules', rules: { ...COMPUTE_RULES } },
++  events: { name: 'events', label: 'Compute + market events', rules: { ...COMPUTE_RULES, marketEvents: true } },
++  volta: { name: 'volta', label: 'Classic + Volta cards', voltaCards: true },
++  'compute+volta': { name: 'compute+volta', label: 'Compute + Volta cards', rules: { ...COMPUTE_RULES }, voltaCards: true },
++};
++
++export const SIM_CONFIG_NAMES = Object.keys(SIM_CONFIGS) as SimConfigName[];
++
++export function isSimConfigName(name: string): name is SimConfigName {
++  return name in SIM_CONFIGS;
++}
++
++/** The four companies in their default seats, all computer-controlled (as the engine tests' ALL_AI). */
++export const SIM_COMPANIES = ['parallax', 'helixa', 'ambulo', 'stacksmith'];
++
++/**
++ * All-AI seat list for `players` companies. Without rotation, seats take the companies in the
++ * default order (parallax in seat 0). `rotation` shifts the company list first, so a batch can give
++ * every company every seat and separate seat effects from company (AI style) effects.
++ */
++export function simSeats(players = 4, rotation = 0): SeatConfig[] {
++  if (players < 2 || players > SIM_COMPANIES.length) throw new Error(`Simulations need 2–${SIM_COMPANIES.length} players.`);
++  const k = ((rotation % SIM_COMPANIES.length) + SIM_COMPANIES.length) % SIM_COMPANIES.length;
++  const order = [...SIM_COMPANIES.slice(k), ...SIM_COMPANIES.slice(0, k)];
++  return order.slice(0, players).map((companyId) => ({ companyId, isAI: true }));
++}
++
++// ---------------------------------------------------------------------------
++// Per-game metrics
++// ---------------------------------------------------------------------------
++
++/** Safety caps. Classic 4-player AI games take ~50–90 turns and ~230–390 actions (docs/BALANCE.md). */
++export const DEFAULT_MAX_STEPS = 20000;
++export const DEFAULT_MAX_TURNS = 600;
++
++export type GameStatus = 'won' | 'stalled' | 'aborted';
++
++export interface IllegalAction {
++  turn: number;
++  phase: Phase;
++  actor: number;
++  companyId: string;
++  /** Null when decideAIAction itself threw. */
++  actionType: ActionType | null;
++  action: Action | null;
++  message: string;
++  /** 'GameError' = the reducer rejected the AI's move; anything else = a crash. */
++  error: string;
++}
++
++export interface FinancingRecord {
++  owner: number;
++  companyId: string;
++  vertex: number;
++  /** Action that created it (normally BUILD_FINANCED_FACTORY); 'initial' when the start state had it. */
++  source: ActionType | 'initial';
++  turnFinanced: number;
++  roundFinanced: number;
++  /** Committed units owed when it was financed. */
++  commitment: number;
++  /** Largest commitment seen (market events may extend it). */
++  maxCommitment: number;
++  /** Committed units delivered (ProductionReport.deliveries). */
++  deliveries: number;
++  /** Rolls on which one of its producing hexes was blocked by the outage marker. */
++  blockedRolls: number;
++  /** Payouts of its hexes lost to a market shortage. */
++  shortageMisses: number;
++  status: 'outstanding' | 'completed' | 'refinanced';
++  turnCompleted: number | null;
++  turnRefinanced: number | null;
++  /** Units cleared by REFINANCE and the Capital actually paid for them. */
++  unitsRefinanced: number;
++  refinanceCapital: number;
++  /** Rounds (turns / players) from financing to completion or refinance; null while outstanding. */
++  roundsToResolve: number | null;
++}
++
++export interface ProductionProfile {
++  /** Distinct resource types among numbered hexes adjacent to the company's buildings (0–5). */
++  diversity: number;
++  /** Share of the company's production pips in its single top resource (0–1). */
++  specialization: number;
++  topResource: Resource | null;
++  /** Production pips (full factories count double, financed ones single; outage ignored). */
++  totalPips: number;
++}
++
++export interface CompanyMetrics {
++  seat: number;
++  companyId: string;
++  won: boolean;
++  /** Final Compute Points including hidden AI Breakthroughs, and the public total. */
++  cp: number;
++  publicCp: number;
++  /** Pieces on the board at the end. */
++  final: { clusters: number; factories: number; financedFactories: number; roads: number; breakthroughs: number };
++  /** Successful build actions during regular play (the opening draft is not counted). */
++  built: {
++    clusters: number;
++    /** Standard upgrades (BUILD_FACTORY). */
++    factories: number;
++    /** Financed upgrades (BUILD_FINANCED_FACTORY). */
++    financedFactories: number;
++    /** Integrated Deployments (BUILD_INTEGRATED_FACTORY). */
++    integratedFactories: number;
++    /** Expedited Deployment card plays (PLAY_INTEGRATION). */
++    expedited: number;
++    /** Network Connections, including free ones. */
++    roads: number;
++    freeRoads: number;
++  };
++  refinances: number;
++  refinanceCapital: number;
++  cardsBought: Record<DevCardType, number>;
++  cardsPlayed: Record<DevCardType, number>;
++  bankTrades: number;
++  offersProposed: number;
++  /** Own offers a rival accepted. */
++  offersAccepted: number;
++  offersReceived: number;
++  offersAcceptedAsResponder: number;
++  disruption: {
++    /** Times this company moved the marker (7s and Infrastructure Priority). */
++    moved: number;
++    /** Times a rival took a resource from it. */
++    robbed: number;
++    /** Times a rival put the marker on a hex next to one of its buildings. */
++    tileHits: number;
++  };
++  longestNetwork: boolean;
++  priorityAccess: boolean;
++  /** Most financed factories outstanding at once, and how many still owe units at the end. */
++  maxOutstandingFinancing: number;
++  outstandingAtEnd: number;
++  /** First moment Player.fullStackTurn appears: its turn, the round, and the company's CP then. */
++  fullStack: { turn: number; round: number; cp: number; publicCp: number } | null;
++  /** Production profile at the end, and of the opening placement (unaffected by how the game went). */
++  profile: ProductionProfile & { factoryCount: number; cardsBought: number };
++  opening: ProductionProfile;
++}
++
++export interface GameMetrics {
++  seed: number;
++  config: string;
++  players: number;
++  rules: RuleOptions;
++  voltaCards: boolean;
++  status: GameStatus;
++  /** Global turn counter at the end, and rounds = ceil(turn / players). */
++  turns: number;
++  rounds: number;
++  /** Actions applied. */
++  steps: number;
++  winner: { seat: number; companyId: string } | null;
++  stalled: boolean;
++  stallReason: 'maxSteps' | 'maxTurns' | null;
++  illegal: IllegalAction | null;
++  /** Conservation / immutability problems seen (first few; see invariantViolationCount). */
++  invariantViolations: string[];
++  invariantViolationCount: number;
++  sevens: number;
++  companies: CompanyMetrics[];
++  financing: FinancingRecord[];
++  marketEvents: { turn: number; type: MarketEventType }[];
++}
++
++export interface RunGameOptions {
++  seed: number;
++  rules?: Partial<RuleOptions>;
++  seats?: SeatConfig[];
++  voltaCards?: boolean;
++  /** Stop as 'stalled' after this many applied actions (default DEFAULT_MAX_STEPS). */
++  maxSteps?: number;
++  /** Stop as 'stalled' once the global turn counter passes this (default DEFAULT_MAX_TURNS). */
++  maxTurns?: number;
++  /** Label stored in the metrics (default 'custom'). */
++  config?: string;
++  /** Check conservation and input immutability after every action (default true; cheap). */
++  checkInvariants?: boolean;
++  /**
++   * Start from this state instead of createGame (tests, crafted positions). `seed` is then only a
++   * label, and rules / seats / voltaCards are ignored. Every player is played by the AI.
++   */
++  from?: GameState;
++  /**
++   * Decision policy (default decideAIAction). Wrap it to run policy experiments, e.g. one seat that
++   * always finances, to measure a mechanic apart from the heuristic AI's taste for it.
++   */
++  decide?: (state: GameState, player: number) => Action;
++  /** Reducer (default applyAction). A test seam: lets tests stand in for engine features still stubbed. */
++  apply?: (state: GameState, action: Action) => GameState;
++}
++
++const CARD_TYPES = Object.keys(DEV_DECK_COMPOSITION) as DevCardType[];
++
++const PLAYED_CARD: Partial<Record<ActionType, DevCardType>> = {
++  PLAY_PRIORITY: 'priority',
++  PLAY_EXPANSION: 'expansion',
++  PLAY_GRANT: 'grant',
++  PLAY_CONSOLIDATION: 'consolidation',
++  PLAY_INTEGRATION: 'integration',
++};
++
++const MAX_VIOLATIONS_KEPT = 10;
++
++function cardCounts(): Record<DevCardType, number> {
++  const out = {} as Record<DevCardType, number>;
++  for (const t of CARD_TYPES) out[t] = 0;
++  return out;
++}
++
++export function roundOf(turn: number, players: number): number {
++  return Math.ceil(turn / players);
++}
++
++export function productionProfile(state: GameState, player: number): ProductionProfile {
++  const types = new Set<Resource>();
++  state.buildings.forEach((b, v) => {
++    if (!b || b.owner !== player) return;
++    for (const t of state.board.vertices[v].tileIds) {
++      const tile = state.board.tiles[t];
++      if (tile.type !== 'barren' && tile.number !== null) types.add(tile.type);
++    }
++  });
++  const prod = productionPips(state, player, true);
++  const total = sumBundle(prod);
++  let top: Resource | null = null;
++  for (const r of RESOURCES) if (prod[r] > 0 && (top === null || prod[r] > prod[top])) top = r;
++  return {
++    diversity: types.size,
++    specialization: total > 0 && top ? prod[top] / total : 0,
++    topResource: top,
++    totalPips: total,
++  };
++}
++
++function newCompany(state: GameState, player: number): CompanyMetrics {
++  return {
++    seat: player,
++    companyId: state.players[player].companyId,
++    won: false,
++    cp: 0,
++    publicCp: 0,
++    final: { clusters: 0, factories: 0, financedFactories: 0, roads: 0, breakthroughs: 0 },
++    built: { clusters: 0, factories: 0, financedFactories: 0, integratedFactories: 0, expedited: 0, roads: 0, freeRoads: 0 },
++    refinances: 0,
++    refinanceCapital: 0,
++    cardsBought: cardCounts(),
++    cardsPlayed: cardCounts(),
++    bankTrades: 0,
++    offersProposed: 0,
++    offersAccepted: 0,
++    offersReceived: 0,
++    offersAcceptedAsResponder: 0,
++    disruption: { moved: 0, robbed: 0, tileHits: 0 },
++    longestNetwork: false,
++    priorityAccess: false,
++    maxOutstandingFinancing: 0,
++    outstandingAtEnd: 0,
++    fullStack: null,
++    profile: { diversity: 0, specialization: 0, topResource: null, totalPips: 0, factoryCount: 0, cardsBought: 0 },
++    opening: productionProfile(state, player),
++  };
++}
++
++/** Everything an action could change by mistake in its INPUT state (applyAction must not mutate it). */
++function fingerprint(s: GameState): string {
++  const parts: (string | number)[] = [s.turn, s.phase, s.currentPlayer, s.rng, s.disruptionTile, s.devDeck.length, s.log.length];
++  for (const r of RESOURCES) parts.push(s.bank[r]);
++  for (const p of s.players) {
++    for (const r of RESOURCES) parts.push(p.resources[r]);
++    parts.push(p.devCards.length, p.priorityPlayed, p.fullStackTurn ?? -1);
++  }
++  for (const b of s.buildings) parts.push(b ? `${b.owner}${b.kind[0]}${b.financed ?? ''}` : '-');
++  for (const r of s.roads) parts.push(r ?? '-');
++  return parts.join(',');
++}
++
++function conservationProblem(s: GameState): string | null {
++  for (const r of RESOURCES) {
++    let total = s.bank[r];
++    for (const p of s.players) {
++      if (p.resources[r] < 0) return `${p.name} holds ${p.resources[r]} ${r}`;
++      total += p.resources[r];
++    }
++    if (s.bank[r] < 0) return `market holds ${s.bank[r]} ${r}`;
++    if (total !== BANK_SUPPLY_PER_RESOURCE) return `${r} total is ${total}, not ${BANK_SUPPLY_PER_RESOURCE}`;
++  }
++  return null;
++}
++
++/** Play one seeded AI-only game to the end (or a cap / an illegal action) and measure it. */
++export function runGame(options: RunGameOptions): GameMetrics {
++  const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
++  const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
++  const checks = options.checkInvariants ?? true;
++  const decide = options.decide ?? decideAIAction;
++  const apply = options.apply ?? applyAction;
++  let s = options.from ?? createGame({ seed: options.seed, seats: options.seats ?? simSeats(4), voltaCards: options.voltaCards, rules: options.rules });
++  const n = s.players.length;
++  const { tiles, vertices } = s.board;
++  const companies = s.players.map((p) => newCompany(s, p.id));
++  const financing: FinancingRecord[] = [];
++  const open = new Map<number, FinancingRecord>(); // vertex → outstanding financed factory
++  const marketEvents: GameMetrics['marketEvents'] = [];
++  const violations: string[] = [];
++  let violationCount = 0;
++  let illegal: IllegalAction | null = null;
++  let stallReason: GameMetrics['stallReason'] = null;
++  let steps = 0;
++  let sevens = 0;
++
++  const violation = (text: string) => {
++    violationCount++;
++    if (violations.length < MAX_VIOLATIONS_KEPT) violations.push(`turn ${s.turn}: ${text}`);
++  };
++
++  /** Financed factories: open a record when one appears, close it when its field disappears. */
++  const syncFinancing = (prev: GameState | null, action: Action | null, next: GameState) => {
++    for (const [v, rec] of open) {
++      const b = next.buildings[v];
++      if (b && b.owner === rec.owner && b.kind === 'factory') {
++        if (isFinanced(b)) {
++          rec.maxCommitment = Math.max(rec.maxCommitment, b.financed!);
++          continue;
++        }
++        if (action?.type === 'REFINANCE' && action.vertex === v) {
++          rec.status = 'refinanced';
++          rec.turnRefinanced = next.turn;
++          rec.unitsRefinanced = prev?.buildings[v]?.financed ?? 0;
++          rec.refinanceCapital = prev ? prev.players[rec.owner].resources.capital - next.players[rec.owner].resources.capital : 0;
++        } else {
++          rec.status = 'completed';
++          rec.turnCompleted = next.turn;
++        }
++        rec.roundsToResolve = (next.turn - rec.turnFinanced) / n;
++      } else {
++        violation(`financed factory at vertex ${v} disappeared after ${action?.type ?? 'setup'}`);
++      }
++      open.delete(v);
++    }
++    next.buildings.forEach((b, v) => {
++      if (!b || !isFinanced(b) || open.has(v)) return;
++      const rec: FinancingRecord = {
++        owner: b.owner,
++        companyId: next.players[b.owner].companyId,
++        vertex: v,
++        source: action?.type ?? 'initial',
++        turnFinanced: next.turn,
++        roundFinanced: roundOf(next.turn, n),
++        commitment: b.financed!,
++        maxCommitment: b.financed!,
++        deliveries: 0,
++        blockedRolls: 0,
++        shortageMisses: 0,
++        status: 'outstanding',
++        turnCompleted: null,
++        turnRefinanced: null,
++        unitsRefinanced: 0,
++        refinanceCapital: 0,
++        roundsToResolve: null,
++      };
++      financing.push(rec);
++      open.set(v, rec);
++    });
++    const outstanding = new Array<number>(n).fill(0);
++    for (const rec of open.values()) outstanding[rec.owner]++;
++    outstanding.forEach((k, i) => (companies[i].maxOutstandingFinancing = Math.max(companies[i].maxOutstandingFinancing, k)));
++  };
++
++  const syncFullStack = (next: GameState) => {
++    next.players.forEach((p, i) => {
++      if (companies[i].fullStack || p.fullStackTurn === undefined) return;
++      const score = scoreBreakdown(next, i);
++      companies[i].fullStack = { turn: p.fullStackTurn, round: roundOf(p.fullStackTurn, n), cp: score.total, publicCp: score.publicTotal };
++    });
++  };
++
++  const syncMarket = (prev: GameState, next: GameState) => {
++    const last = next.market?.last;
++    const before = prev.market?.last;
++    if (last && (!before || before.turn !== last.turn || before.type !== last.type)) marketEvents.push({ turn: last.turn, type: last.type });
++  };
++
++  /** Production on a regular roll: deliveries, outage blocks and shortages for open commitments. */
++  const observeRoll = (next: GameState) => {
++    const report = next.lastProduction;
++    if (!report) return;
++    for (const rec of open.values()) {
++      for (const t of vertices[rec.vertex].tileIds) {
++        const tile = tiles[t];
++        if (tile.number !== report.roll || tile.type === 'barren') continue;
++        if (t === report.blockedTileId) rec.blockedRolls++;
++        else if (report.shortages.includes(tile.type)) rec.shortageMisses++;
++      }
++      for (const d of report.deliveries ?? []) if (d.vertex === rec.vertex) rec.deliveries++;
++    }
++  };
++
++  const observe = (prev: GameState, action: Action, next: GameState, actor: number) => {
++    const c = companies[actor];
++    switch (action.type) {
++      case 'BUILD_CLUSTER':
++        c.built.clusters++;
++        break;
++      case 'BUILD_FACTORY':
++        c.built.factories++;
++        break;
++      case 'BUILD_FINANCED_FACTORY':
++        c.built.financedFactories++;
++        break;
++      case 'BUILD_INTEGRATED_FACTORY':
++        c.built.integratedFactories++;
++        break;
++      case 'PLAY_INTEGRATION':
++        c.built.expedited++;
++        break;
++      case 'BUILD_ROAD':
++        c.built.roads++;
++        if (prev.phase === 'freeRoads') c.built.freeRoads++;
++        break;
++      case 'REFINANCE':
++        c.refinances++;
++        c.refinanceCapital += prev.players[actor].resources.capital - next.players[actor].resources.capital;
++        break;
++      case 'BUY_CARD': {
++        const card = next.players[actor].devCards.find((d) => d.id === prev.nextCardId);
++        if (card) c.cardsBought[card.type]++;
++        break;
++      }
++      case 'BANK_TRADE':
++        c.bankTrades++;
++        break;
++      case 'PROPOSE_TRADE':
++        c.offersProposed++;
++        companies[action.to].offersReceived++;
++        break;
++      case 'RESPOND_TRADE':
++        if (action.accept && prev.pendingTrade) {
++          companies[prev.pendingTrade.from].offersAccepted++;
++          c.offersAcceptedAsResponder++;
++        }
++        break;
++      case 'ROLL':
++        if (next.lastRoll?.total === 7) sevens++;
++        else observeRoll(next);
++        break;
++      case 'MOVE_DISRUPTION': {
++        c.disruption.moved++;
++        if (action.victim !== null) companies[action.victim].disruption.robbed++;
++        const owners = new Set<number>();
++        for (const v of tiles[action.tile].vertexIds) {
++          const b = next.buildings[v];
++          if (b && b.owner !== actor) owners.add(b.owner);
++        }
++        for (const o of owners) companies[o].disruption.tileHits++;
++        break;
++      }
++      default:
++        break;
++    }
++    const played = PLAYED_CARD[action.type];
++    if (played) c.cardsPlayed[played]++;
++    syncFinancing(prev, action, next);
++    syncFullStack(next);
++    syncMarket(prev, next);
++  };
++
++  syncFinancing(null, null, s);
++  syncFullStack(s);
++
++  while (s.phase !== 'gameOver') {
++    if (steps >= maxSteps) {
++      stallReason = 'maxSteps';
++      break;
++    }
++    if (s.turn > maxTurns) {
++      stallReason = 'maxTurns';
++      break;
++    }
++    const actor = getActingPlayer(s)!;
++    const before = checks ? fingerprint(s) : '';
++    let action: Action | null = null;
++    let next: GameState;
++    try {
++      action = decide(s, actor);
++      next = apply(s, action);
++    } catch (e) {
++      // Never hidden: the game ends as 'aborted' and the batch summary lists it.
++      illegal = {
++        turn: s.turn,
++        phase: s.phase,
++        actor,
++        companyId: s.players[actor].companyId,
++        actionType: action?.type ?? null,
++        action,
++        message: e instanceof Error ? e.message : String(e),
++        error: e instanceof GameError ? 'GameError' : e instanceof Error ? e.constructor.name : typeof e,
++      };
++      break;
++    }
++    if (checks) {
++      if (fingerprint(s) !== before) violation(`${action.type}: the input state changed (decideAIAction or applyAction mutated it)`);
++      const problem = conservationProblem(next);
++      if (problem) violation(`after ${action.type}: ${problem}`);
++    }
++    observe(s, action, next, actor);
++    s = next;
++    steps++;
++  }
++
++  const status: GameStatus = illegal ? 'aborted' : s.phase === 'gameOver' ? 'won' : 'stalled';
++  companies.forEach((c, i) => {
++    const score = scoreBreakdown(s, i);
++    c.won = status === 'won' && s.winner === i;
++    c.cp = score.total;
++    c.publicCp = score.publicTotal;
++    c.final = {
++      clusters: score.clusters,
++      factories: score.factories,
++      financedFactories: score.financedFactories,
++      roads: s.roads.filter((o) => o === i).length,
++      breakthroughs: score.breakthroughs,
++    };
++    c.longestNetwork = s.longestRoadHolder === i;
++    c.priorityAccess = s.largestArmyHolder === i;
++    c.outstandingAtEnd = [...open.values()].filter((r) => r.owner === i).length;
++    const bought = CARD_TYPES.reduce((k, t) => k + c.cardsBought[t], 0);
++    c.profile = { ...productionProfile(s, i), factoryCount: score.factories + score.financedFactories, cardsBought: bought };
++  });
++
++  return {
++    seed: options.seed,
++    config: options.config ?? 'custom',
++    players: n,
++    rules: { ...rulesOf(s) },
++    voltaCards: !!s.voltaCards,
++    status,
++    turns: s.turn,
++    rounds: roundOf(s.turn, n),
++    steps,
++    winner: status === 'won' && s.winner !== null ? { seat: s.winner, companyId: s.players[s.winner].companyId } : null,
++    stalled: status === 'stalled',
++    stallReason: status === 'stalled' ? stallReason : null,
++    illegal,
++    invariantViolations: violations,
++    invariantViolationCount: violationCount,
++    sevens,
++    companies,
++    financing,
++    marketEvents,
++  };
++}
++
++// ---------------------------------------------------------------------------
++// Batches
++// ---------------------------------------------------------------------------
++
++export interface BatchOptions {
++  config: SimConfigName | SimConfig;
++  games: number;
++  /** First seed; game k uses seed + k, so every config plays the same boards and opening dice. */
++  seed?: number;
++  players?: number;
++  /** Game k shifts the company list by k (every company sits in every seat equally often). */
++  rotateSeats?: boolean;
++  maxSteps?: number;
++  maxTurns?: number;
++  checkInvariants?: boolean;
++  /** Decision policy for every game (see RunGameOptions.decide). */
++  decide?: (state: GameState, player: number) => Action;
++  onGame?: (metrics: GameMetrics, index: number) => void;
++}
++
++export const DEFAULT_SIM_SEED = 20000;
++
++export function runBatch(options: BatchOptions): GameMetrics[] {
++  const config = typeof options.config === 'string' ? SIM_CONFIGS[options.config] : options.config;
++  const first = options.seed ?? DEFAULT_SIM_SEED;
++  const players = options.players ?? 4;
++  const out: GameMetrics[] = [];
++  for (let k = 0; k < options.games; k++) {
++    const m = runGame({
++      seed: first + k,
++      rules: config.rules,
++      voltaCards: config.voltaCards,
++      seats: simSeats(players, options.rotateSeats ? k : 0),
++      maxSteps: options.maxSteps,
++      maxTurns: options.maxTurns,
++      checkInvariants: options.checkInvariants,
++      decide: options.decide,
++      config: config.name,
++    });
++    options.onGame?.(m, k);
++    out.push(m);
++  }
++  return out;
++}
++
++// ---------------------------------------------------------------------------
++// Aggregation
++// ---------------------------------------------------------------------------
++
++export interface Dist {
++  n: number;
++  mean: number;
++  sd: number;
++  median: number;
++  p10: number;
++  p90: number;
++  min: number;
++  max: number;
++}
++
++/** Wins of a group of appearances (a company, a seat, a strategy bucket). */
++export interface WinRow {
++  key: string;
++  /** Appearances in decided games (company-games). */
++  n: number;
++  wins: number;
++  /** wins / n. A fair rate is 1 / players. */
++  winRate: number;
++  /** wins / decided games (sums to 100% over companies or seats). */
++  share: number;
++  /** winRate × players: 1.0 = wins exactly its fair share. */
++  lift: number;
++  /** 95% normal-approximation half-width of winRate. */
++  ci95: number;
++}
++
++export interface IllegalSummary {
++  count: number;
++  /** "ACTION_TYPE: message" → occurrences. */
++  byKind: Record<string, number>;
++  /** The first few, with their seeds, for reproduction. */
++  examples: (IllegalAction & { seed: number })[];
++}
++
++export interface SimSummary {
++  config: string;
++  label: string;
++  rules: RuleOptions;
++  voltaCards: boolean;
++  players: number;
++  games: number;
++  seeds: { first: number; last: number };
++  /** True when companies rotated through the seats. */
++  rotated: boolean;
++  decided: number;
++  stalls: number;
++  aborts: number;
++  illegal: IllegalSummary;
++  invariantViolations: { games: number; total: number; examples: string[] };
++  /** Over decided games. */
++  length: { turns: Dist; rounds: Dist; steps: Dist };
++  winsByCompany: WinRow[];
++  winsBySeat: WinRow[];
++  cp: { winner: Dist; runnerUp: Dist; losers: Dist; closeGameShare: number };
++  /** Per-game totals over all companies (decided + stalled games). */
++  perGame: {
++    clusters: Dist;
++    factories: Dist;
++    roads: Dist;
++    cardsBought: Dist;
++    cardsPlayed: Dist;
++    bankTrades: Dist;
++    offersProposed: Dist;
++    expedited: Dist;
++    sevens: Dist;
++  };
++  offerAcceptRate: number;
++  cardsBoughtByType: Record<DevCardType, number>;
++  cardsPlayedByType: Record<DevCardType, number>;
++  byCompany: {
++    companyId: string;
++    n: number;
++    cp: number;
++    clusters: number;
++    factories: number;
++    financedUpgrades: number;
++    integrated: number;
++    roads: number;
++    cardsBought: number;
++    bankTrades: number;
++    robbed: number;
++    tileHits: number;
++    longestNetwork: number;
++    priorityAccess: number;
++  }[];
++  bonuses: { longestNetworkHolderWinRate: number; priorityAccessHolderWinRate: number; longestNetworkHeld: number; priorityAccessHeld: number };
++  financing: {
++    gamesWithFinancing: number;
++    gamesWithFinancingShare: number;
++    perGame: Dist;
++    /** Share of company-games with at least one financed upgrade. */
++    companyShare: number;
++    records: number;
++    completed: number;
++    refinanced: number;
++    outstandingAtEnd: number;
++    refinanceShare: number;
++    roundsToComplete: Dist;
++    roundsToRefinance: Dist;
++    refinanceCapital: Dist;
++    deliveriesPerRecord: number;
++    blockedRollsPerRecord: number;
++    shortageMissesPerRecord: number;
++    /** Company-games by the most financed factories they had outstanding at once. */
++    maxOutstanding: Record<string, number>;
++    financers: WinRow;
++    nonFinancers: WinRow;
++  };
++  fullStack: {
++    unlocks: number;
++    /** Share of company-games that unlocked Full-Stack. */
++    unlockRate: number;
++    gamesWithUnlock: number;
++    cpAtUnlock: Dist;
++    roundAtUnlock: Dist;
++    integratedPerGame: Dist;
++    unlockers: WinRow;
++    nonUnlockers: WinRow;
++  };
++  profile: {
++    bySpecialization: WinRow[];
++    byDiversity: WinRow[];
++    byCardsBought: WinRow[];
++    byFactories: WinRow[];
++    byOpeningSpecialization: WinRow[];
++    byOpeningDiversity: WinRow[];
++  };
++  disruption: { robbedPerCompanyGame: number; tileHitsPerCompanyGame: number };
++  marketEvents: { perGame: Dist; byType: Record<string, number> };
++}
++
++/** Linear-interpolation quantile of an ascending array. */
++function quantile(sorted: number[], q: number): number {
++  if (sorted.length === 0) return 0;
++  const pos = (sorted.length - 1) * q;
++  const lo = Math.floor(pos);
++  const hi = Math.ceil(pos);
++  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
++}
++
++export function dist(values: number[]): Dist {
++  const n = values.length;
++  if (n === 0) return { n: 0, mean: 0, sd: 0, median: 0, p10: 0, p90: 0, min: 0, max: 0 };
++  const sorted = values.slice().sort((a, b) => a - b);
++  const mean = values.reduce((a, b) => a + b, 0) / n;
++  const sd = n > 1 ? Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)) : 0;
++  return {
++    n,
++    mean,
++    sd,
++    median: quantile(sorted, 0.5),
++    p10: quantile(sorted, 0.1),
++    p90: quantile(sorted, 0.9),
++    min: sorted[0],
++    max: sorted[n - 1],
++  };
++}
++
++function ratio(a: number, b: number): number {
++  return b > 0 ? a / b : 0;
++}
++
++function winRow(key: string, n: number, wins: number, decided: number, players: number): WinRow {
++  const winRate = ratio(wins, n);
++  return { key, n, wins, winRate, share: ratio(wins, decided), lift: winRate * players, ci95: n > 0 ? 1.96 * Math.sqrt((winRate * (1 - winRate)) / n) : 0 };
++}
++
++interface Appearance {
++  game: GameMetrics;
++  c: CompanyMetrics;
++}
++
++function groupWins(apps: Appearance[], keyOf: (a: Appearance) => string, order: string[], decided: number, players: number): WinRow[] {
++  const groups = new Map<string, { n: number; wins: number }>();
++  for (const k of order) groups.set(k, { n: 0, wins: 0 });
++  for (const a of apps) {
++    const k = keyOf(a);
++    const g = groups.get(k) ?? { n: 0, wins: 0 };
++    g.n++;
++    if (a.c.won) g.wins++;
++    groups.set(k, g);
++  }
++  return [...groups].filter(([, g]) => g.n > 0).map(([k, g]) => winRow(k, g.n, g.wins, decided, players));
++}
++
++/** Terciles of a value over all appearances; ties stay in the lower bucket. */
++function tercileKey(values: number[], digits = 2): (v: number) => string {
++  const sorted = values.slice().sort((a, b) => a - b);
++  const t1 = quantile(sorted, 1 / 3);
++  const t2 = quantile(sorted, 2 / 3);
++  return (v) => (v <= t1 ? `low ≤${t1.toFixed(digits)}` : v <= t2 ? `mid ≤${t2.toFixed(digits)}` : `high >${t2.toFixed(digits)}`);
++}
++
++function orderedKeys(apps: Appearance[], keyOf: (a: Appearance) => string, values: (a: Appearance) => number): string[] {
++  const best = new Map<string, number>();
++  for (const a of apps) {
++    const k = keyOf(a);
++    best.set(k, Math.min(best.get(k) ?? Infinity, values(a)));
++  }
++  return [...best].sort((x, y) => x[1] - y[1]).map(([k]) => k);
++}
++
++const factoriesKey = (k: number) => `${k} ${k === 1 ? 'factory' : 'factories'}`;
++
++function sumCards(r: Record<DevCardType, number>): number {
++  return CARD_TYPES.reduce((k, t) => k + r[t], 0);
++}
++
++/** Summarize a batch of games played under one config and player count. */
++export function aggregate(metrics: GameMetrics[], label?: string): SimSummary {
++  if (metrics.length === 0) throw new Error('aggregate: no games.');
++  const first = metrics[0];
++  const players = first.players;
++  const config = first.config;
++  const valid = metrics.filter((m) => m.status !== 'aborted'); // decided + stalled
++  const decidedGames = metrics.filter((m) => m.status === 'won');
++  const decided = decidedGames.length;
++  const apps: Appearance[] = decidedGames.flatMap((game) => game.companies.map((c) => ({ game, c })));
++  const allApps: Appearance[] = valid.flatMap((game) => game.companies.map((c) => ({ game, c })));
++  const companyIds = [...new Set(metrics.flatMap((m) => m.companies.map((c) => c.companyId)))].sort(
++    (a, b) => SIM_COMPANIES.indexOf(a) - SIM_COMPANIES.indexOf(b),
++  );
++
++  // Illegal actions and invariants
++  const illegalGames = metrics.filter((m) => m.illegal);
++  const byKind: Record<string, number> = {};
++  for (const m of illegalGames) {
++    const k = `${m.illegal!.actionType ?? 'decideAIAction'}: ${m.illegal!.message}`;
++    byKind[k] = (byKind[k] ?? 0) + 1;
++  }
++  const violated = metrics.filter((m) => m.invariantViolationCount > 0);
++
++  // CP spread in decided games
++  const winnerCp: number[] = [];
++  const runnerUp: number[] = [];
++  const losers: number[] = [];
++  let close = 0;
++  for (const g of decidedGames) {
++    const others = g.companies.filter((c) => !c.won).map((c) => c.cp);
++    winnerCp.push(g.companies.find((c) => c.won)!.cp);
++    const best = Math.max(...others);
++    runnerUp.push(best);
++    losers.push(...others);
++    if (best >= VP_TO_WIN - 2) close++;
++  }
++
++  const perGame = (f: (c: CompanyMetrics) => number) => dist(valid.map((g) => g.companies.reduce((k, c) => k + f(c), 0)));
++  const totalBoughtByType = cardCounts();
++  const totalPlayedByType = cardCounts();
++  for (const { c } of allApps) {
++    for (const t of CARD_TYPES) {
++      totalBoughtByType[t] += c.cardsBought[t];
++      totalPlayedByType[t] += c.cardsPlayed[t];
++    }
++  }
++  const perGameByType = (r: Record<DevCardType, number>) => {
++    const out = cardCounts();
++    for (const t of CARD_TYPES) out[t] = ratio(r[t], valid.length);
++    return out;
++  };
++  const proposed = allApps.reduce((k, a) => k + a.c.offersProposed, 0);
++  const accepted = allApps.reduce((k, a) => k + a.c.offersAccepted, 0);
++
++  const byCompany = companyIds.map((id) => {
++    const cs = allApps.filter((a) => a.c.companyId === id).map((a) => a.c);
++    const mean = (f: (c: CompanyMetrics) => number) => ratio(cs.reduce((k, c) => k + f(c), 0), cs.length);
++    return {
++      companyId: id,
++      n: cs.length,
++      cp: mean((c) => c.cp),
++      clusters: mean((c) => c.built.clusters),
++      factories: mean((c) => c.built.factories),
++      financedUpgrades: mean((c) => c.built.financedFactories),
++      integrated: mean((c) => c.built.integratedFactories),
++      roads: mean((c) => c.built.roads),
++      cardsBought: mean((c) => sumCards(c.cardsBought)),
++      bankTrades: mean((c) => c.bankTrades),
++      robbed: mean((c) => c.disruption.robbed),
++      tileHits: mean((c) => c.disruption.tileHits),
++      longestNetwork: mean((c) => (c.longestNetwork ? 1 : 0)),
++      priorityAccess: mean((c) => (c.priorityAccess ? 1 : 0)),
++    };
++  });
++
++  const holders = (f: (c: CompanyMetrics) => boolean) => {
++    const held = apps.filter((a) => f(a.c));
++    return { rate: ratio(held.filter((a) => a.c.won).length, held.length), n: held.length };
++  };
++  const lnh = holders((c) => c.longestNetwork);
++  const pah = holders((c) => c.priorityAccess);
++
++  // Financing (records over all non-aborted games; win rates over decided games)
++  const records = valid.flatMap((g) => g.financing);
++  const completed = records.filter((r) => r.status === 'completed');
++  const refinanced = records.filter((r) => r.status === 'refinanced');
++  const maxOutstanding: Record<string, number> = {};
++  for (const { c } of allApps) maxOutstanding[String(c.maxOutstandingFinancing)] = (maxOutstanding[String(c.maxOutstandingFinancing)] ?? 0) + 1;
++  const isFinancer = (c: CompanyMetrics) => c.built.financedFactories > 0;
++  const financerApps = apps.filter((a) => isFinancer(a.c));
++  const unlockApps = apps.filter((a) => a.c.fullStack);
++  const unlocksAll = allApps.filter((a) => a.c.fullStack);
++
++  // Strategy profiles (decided games only)
++  const specKey = tercileKey(apps.map((a) => a.c.profile.specialization));
++  const openSpecKey = tercileKey(apps.map((a) => a.c.opening.specialization));
++  const cardsKey = (k: number) => (k === 0 ? '0 cards' : k <= 2 ? '1–2 cards' : k <= 4 ? '3–4 cards' : '5+ cards');
++  const bySpecialization = groupWins(
++    apps,
++    (a) => specKey(a.c.profile.specialization),
++    orderedKeys(apps, (a) => specKey(a.c.profile.specialization), (a) => a.c.profile.specialization),
++    decided,
++    players,
++  );
++  const byOpeningSpecialization = groupWins(
++    apps,
++    (a) => openSpecKey(a.c.opening.specialization),
++    orderedKeys(apps, (a) => openSpecKey(a.c.opening.specialization), (a) => a.c.opening.specialization),
++    decided,
++    players,
++  );
++  const diversityOrder = ['0', '1', '2', '3', '4', '5'].map((d) => `${d} types`);
++
++  const eventsByType: Record<string, number> = {};
++  for (const g of valid) for (const e of g.marketEvents) eventsByType[e.type] = (eventsByType[e.type] ?? 0) + 1;
++
++  return {
++    config,
++    label: label ?? (isSimConfigName(config) ? SIM_CONFIGS[config].label : config),
++    rules: { ...first.rules },
++    voltaCards: first.voltaCards,
++    players,
++    games: metrics.length,
++    seeds: { first: Math.min(...metrics.map((m) => m.seed)), last: Math.max(...metrics.map((m) => m.seed)) },
++    rotated: new Set(metrics.map((m) => m.companies[0].companyId)).size > 1,
++    decided,
++    stalls: metrics.filter((m) => m.status === 'stalled').length,
++    aborts: illegalGames.length,
++    illegal: {
++      count: illegalGames.length,
++      byKind,
++      examples: illegalGames.slice(0, 5).map((m) => ({ ...m.illegal!, seed: m.seed })),
++    },
++    invariantViolations: {
++      games: violated.length,
++      total: violated.reduce((k, m) => k + m.invariantViolationCount, 0),
++      examples: violated.slice(0, 5).flatMap((m) => m.invariantViolations.slice(0, 2).map((v) => `seed ${m.seed}, ${v}`)),
++    },
++    length: {
++      turns: dist(decidedGames.map((m) => m.turns)),
++      rounds: dist(decidedGames.map((m) => m.rounds)),
++      steps: dist(decidedGames.map((m) => m.steps)),
++    },
++    winsByCompany: groupWins(apps, (a) => a.c.companyId, companyIds, decided, players),
++    winsBySeat: groupWins(
++      apps,
++      (a) => `seat ${a.c.seat}`,
++      Array.from({ length: players }, (_, i) => `seat ${i}`),
++      decided,
++      players,
++    ),
++    cp: { winner: dist(winnerCp), runnerUp: dist(runnerUp), losers: dist(losers), closeGameShare: ratio(close, decided) },
++    perGame: {
++      clusters: perGame((c) => c.built.clusters),
++      factories: perGame((c) => c.built.factories),
++      roads: perGame((c) => c.built.roads),
++      cardsBought: perGame((c) => sumCards(c.cardsBought)),
++      cardsPlayed: perGame((c) => sumCards(c.cardsPlayed)),
++      bankTrades: perGame((c) => c.bankTrades),
++      offersProposed: perGame((c) => c.offersProposed),
++      expedited: perGame((c) => c.built.expedited),
++      sevens: dist(valid.map((g) => g.sevens)),
++    },
++    offerAcceptRate: ratio(accepted, proposed),
++    cardsBoughtByType: perGameByType(totalBoughtByType),
++    cardsPlayedByType: perGameByType(totalPlayedByType),
++    byCompany,
++    bonuses: {
++      longestNetworkHolderWinRate: lnh.rate,
++      priorityAccessHolderWinRate: pah.rate,
++      longestNetworkHeld: ratio(lnh.n, decided),
++      priorityAccessHeld: ratio(pah.n, decided),
++    },
++    financing: {
++      gamesWithFinancing: valid.filter((g) => g.financing.length > 0).length,
++      gamesWithFinancingShare: ratio(valid.filter((g) => g.financing.length > 0).length, valid.length),
++      perGame: perGame((c) => c.built.financedFactories),
++      companyShare: ratio(allApps.filter((a) => isFinancer(a.c)).length, allApps.length),
++      records: records.length,
++      completed: completed.length,
++      refinanced: refinanced.length,
++      outstandingAtEnd: records.filter((r) => r.status === 'outstanding').length,
++      refinanceShare: ratio(refinanced.length, records.length),
++      roundsToComplete: dist(completed.map((r) => r.roundsToResolve!)),
++      roundsToRefinance: dist(refinanced.map((r) => r.roundsToResolve!)),
++      refinanceCapital: dist(refinanced.map((r) => r.refinanceCapital)),
++      deliveriesPerRecord: ratio(
++        records.reduce((k, r) => k + r.deliveries, 0),
++        records.length,
++      ),
++      blockedRollsPerRecord: ratio(
++        records.reduce((k, r) => k + r.blockedRolls, 0),
++        records.length,
++      ),
++      shortageMissesPerRecord: ratio(
++        records.reduce((k, r) => k + r.shortageMisses, 0),
++        records.length,
++      ),
++      maxOutstanding,
++      financers: winRow('financers', financerApps.length, financerApps.filter((a) => a.c.won).length, decided, players),
++      nonFinancers: winRow(
++        'non-financers',
++        apps.length - financerApps.length,
++        apps.filter((a) => !isFinancer(a.c) && a.c.won).length,
++        decided,
++        players,
++      ),
++    },
++    fullStack: {
++      unlocks: unlocksAll.length,
++      unlockRate: ratio(unlocksAll.length, allApps.length),
++      gamesWithUnlock: valid.filter((g) => g.companies.some((c) => c.fullStack)).length,
++      cpAtUnlock: dist(unlocksAll.map((a) => a.c.fullStack!.cp)),
++      roundAtUnlock: dist(unlocksAll.map((a) => a.c.fullStack!.round)),
++      integratedPerGame: perGame((c) => c.built.integratedFactories),
++      unlockers: winRow('unlocked', unlockApps.length, unlockApps.filter((a) => a.c.won).length, decided, players),
++      nonUnlockers: winRow(
++        'never unlocked',
++        apps.length - unlockApps.length,
++        apps.filter((a) => !a.c.fullStack && a.c.won).length,
++        decided,
++        players,
++      ),
++    },
++    profile: {
++      bySpecialization,
++      byDiversity: groupWins(apps, (a) => `${a.c.profile.diversity} types`, diversityOrder, decided, players),
++      byCardsBought: groupWins(
++        apps,
++        (a) => cardsKey(a.c.profile.cardsBought),
++        ['0 cards', '1–2 cards', '3–4 cards', '5+ cards'],
++        decided,
++        players,
++      ),
++      byFactories: groupWins(
++        apps,
++        (a) => factoriesKey(a.c.profile.factoryCount),
++        [0, 1, 2, 3, 4].map(factoriesKey),
++        decided,
++        players,
++      ),
++      byOpeningSpecialization,
++      byOpeningDiversity: groupWins(apps, (a) => `${a.c.opening.diversity} types`, diversityOrder, decided, players),
++    },
++    disruption: {
++      robbedPerCompanyGame: ratio(
++        allApps.reduce((k, a) => k + a.c.disruption.robbed, 0),
++        allApps.length,
++      ),
++      tileHitsPerCompanyGame: ratio(
++        allApps.reduce((k, a) => k + a.c.disruption.tileHits, 0),
++        allApps.length,
++      ),
++    },
++    marketEvents: { perGame: dist(valid.map((g) => g.marketEvents.length)), byType: eventsByType },
++  };
++}
++
++// ---------------------------------------------------------------------------
++// Reporting
++// ---------------------------------------------------------------------------
++
++const f1 = (x: number) => x.toFixed(1);
++const f2 = (x: number) => x.toFixed(2);
++const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
++const distCell = (d: Dist, fmt = f1) => (d.n === 0 ? '—' : `${fmt(d.mean)} / ${fmt(d.median)} / ${fmt(d.p10)}–${fmt(d.p90)}`);
++const rowCell = (r: WinRow | undefined) => (!r || r.n === 0 ? '—' : `${pct(r.winRate)} ±${(r.ci95 * 100).toFixed(1)} (${r.wins}/${r.n})`);
++const shareCell = (r: WinRow | undefined) => (!r || r.n === 0 ? '—' : `${pct(r.share)} (${r.wins})`);
++
++function table(header: string[], rows: string[][]): string {
++  const lines = [`| ${header.join(' | ')} |`, `| ${header.map((_, i) => (i === 0 ? '---' : '---:')).join(' | ')} |`];
++  for (const r of rows) lines.push(`| ${r.join(' | ')} |`);
++  return lines.join('\n');
++}
++
++function columnName(s: SimSummary): string {
++  return `${s.config} ${s.players}p${s.rotated ? ' rot' : ''}`;
++}
++
++function bucketTable(title: string, rows: WinRow[], players: number): string {
++  const fair = pct(1 / players);
++  return `**${title}** (fair win rate ${fair})\n\n${table(
++    ['bucket', 'company-games', 'wins', 'win rate ±95%', 'lift'],
++    rows.map((r) => [r.key, String(r.n), String(r.wins), `${pct(r.winRate)} ±${(r.ci95 * 100).toFixed(1)}`, f2(r.lift)]),
++  )}`;
++}
++
++/** A readable markdown report: one column per summary (config × player count). */
++export function formatMarkdown(input: SimSummary[] | Record<string, SimSummary>, title = 'Simulation report'): string {
++  const sums = Array.isArray(input) ? input : Object.values(input);
++  if (sums.length === 0) return `## ${title}\n\n(no runs)\n`;
++  const cols = sums.map(columnName);
++  const out: string[] = [`## ${title}`, ''];
++  const row = (label: string, f: (s: SimSummary) => string) => [label, ...sums.map(f)];
++
++  out.push(
++    '### Overview',
++    '',
++    'Cells with four numbers read `mean / median / p10–p90`. Lengths are over decided games.',
++    '',
++    table(['', ...cols], [
++      row('Config', (s) => s.label),
++      row('Seeds', (s) => `${s.seeds.first}–${s.seeds.last}`),
++      row('Games (decided)', (s) => `${s.games} (${s.decided})`),
++      row('Stalls', (s) => String(s.stalls)),
++      row('Aborted (illegal AI action / crash)', (s) => String(s.aborts)),
++      row('Invariant violations (games)', (s) => String(s.invariantViolations.games)),
++      row('Length, turns', (s) => distCell(s.length.turns)),
++      row('Length, rounds', (s) => distCell(s.length.rounds)),
++      row('Actions per game', (s) => distCell(s.length.steps, (x) => x.toFixed(0))),
++      row('Winner CP', (s) => distCell(s.cp.winner)),
++      row('Runner-up CP', (s) => distCell(s.cp.runnerUp)),
++      row('Other companies CP', (s) => distCell(s.cp.losers)),
++      row(`Close games (runner-up ≥ ${VP_TO_WIN - 2} CP)`, (s) => pct(s.cp.closeGameShare)),
++    ]),
++    '',
++  );
++
++  const companies = [...new Set(sums.flatMap((s) => s.winsByCompany.map((r) => r.key)))];
++  const maxPlayers = Math.max(...sums.map((s) => s.players));
++  out.push(
++    '### Win share',
++    '',
++    '`share (wins)` of decided games. Fair share is 100% / players.',
++    '',
++    table(['', ...cols], [
++      ...companies.map((id) => row(id, (s) => shareCell(s.winsByCompany.find((r) => r.key === id)))),
++      ...Array.from({ length: maxPlayers }, (_, i) => row(`seat ${i}`, (s) => shareCell(s.winsBySeat.find((r) => r.key === `seat ${i}`)))),
++    ]),
++    '',
++  );
++
++  out.push(
++    '### Economy (per game, all companies)',
++    '',
++    table(['', ...cols], [
++      row('Clusters built', (s) => distCell(s.perGame.clusters)),
++      row('Standard factories (BUILD_FACTORY)', (s) => distCell(s.perGame.factories)),
++      row('Connections built', (s) => distCell(s.perGame.roads)),
++      row('Innovation Cards bought', (s) => distCell(s.perGame.cardsBought)),
++      row('Innovation Cards played', (s) => distCell(s.perGame.cardsPlayed)),
++      row('Market / hub trades', (s) => distCell(s.perGame.bankTrades)),
++      row('Offers proposed', (s) => distCell(s.perGame.offersProposed)),
++      row('Offers accepted', (s) => pct(s.offerAcceptRate)),
++      row('Grid Disruption 7s', (s) => distCell(s.perGame.sevens)),
++      row('Robbed, per company-game', (s) => f2(s.disruption.robbedPerCompanyGame)),
++      row('Outage on own hex, per company-game', (s) => f2(s.disruption.tileHitsPerCompanyGame)),
++      row('Longest Network held at end', (s) => pct(s.bonuses.longestNetworkHeld)),
++      row('… holder win rate', (s) => pct(s.bonuses.longestNetworkHolderWinRate)),
++      row('Priority Access held at end', (s) => pct(s.bonuses.priorityAccessHeld)),
++      row('… holder win rate', (s) => pct(s.bonuses.priorityAccessHolderWinRate)),
++    ]),
++    '',
++    '**Cards bought / played per game, by type**',
++    '',
++    table(
++      ['', ...cols],
++      CARD_TYPES.filter((t) => sums.some((s) => s.cardsBoughtByType[t] > 0 || s.cardsPlayedByType[t] > 0)).map((t) =>
++        row(t, (s) => `${f2(s.cardsBoughtByType[t])} / ${f2(s.cardsPlayedByType[t])}`),
++      ),
++    ),
++    '',
++  );
++
++  out.push('### By company (mean per company-game)', '');
++  for (const s of sums) {
++    // Financed / integrated columns only for the rules that allow them.
++    const fin = s.rules.financing;
++    const full = s.rules.fullStack;
++    out.push(
++      `**${columnName(s)}**`,
++      '',
++      table(
++        [
++          'company',
++          'win share',
++          'CP',
++          'clusters',
++          'factories',
++          ...(fin ? ['financed'] : []),
++          ...(full ? ['integrated'] : []),
++          'roads',
++          'cards',
++          'trades',
++          'robbed',
++          'outage hits',
++          'LN',
++          'PA',
++        ],
++        s.byCompany.map((c) => [
++          c.companyId,
++          shareCell(s.winsByCompany.find((r) => r.key === c.companyId)),
++          f2(c.cp),
++          f2(c.clusters),
++          f2(c.factories),
++          ...(fin ? [f2(c.financedUpgrades)] : []),
++          ...(full ? [f2(c.integrated)] : []),
++          f2(c.roads),
++          f2(c.cardsBought),
++          f2(c.bankTrades),
++          f2(c.robbed),
++          f2(c.tileHits),
++          pct(c.longestNetwork),
++          pct(c.priorityAccess),
++        ]),
++      ),
++      '',
++    );
++  }
++
++  if (sums.some((s) => s.voltaCards)) {
++    out.push('### Expedited Deployment (Volta card)', '', table(['', ...cols], [row('Plays per game', (s) => (s.voltaCards ? distCell(s.perGame.expedited, f2) : '—'))]), '');
++  }
++
++  if (sums.some((s) => s.rules.financing)) {
++    const fin = sums.filter((s) => s.rules.financing);
++    const fc = fin.map(columnName);
++    const frow = (label: string, f: (s: SimSummary) => string) => [label, ...fin.map(f)];
++    const outs = [...new Set(fin.flatMap((s) => Object.keys(s.financing.maxOutstanding)))].sort();
++    out.push(
++      '### Infrastructure Financing',
++      '',
++      table(['', ...fc], [
++        frow('Games with ≥1 financed upgrade', (s) => `${s.financing.gamesWithFinancing} (${pct(s.financing.gamesWithFinancingShare)})`),
++        frow('Financed upgrades per game', (s) => distCell(s.financing.perGame, f2)),
++        frow('Companies that financed', (s) => pct(s.financing.companyShare)),
++        frow('Commitments: completed / refinanced / outstanding at end', (s) => `${s.financing.completed} / ${s.financing.refinanced} / ${s.financing.outstandingAtEnd}`),
++        frow('Rounds to complete', (s) => distCell(s.financing.roundsToComplete)),
++        frow('Rounds to refinance', (s) => distCell(s.financing.roundsToRefinance)),
++        frow('Refinance share', (s) => pct(s.financing.refinanceShare)),
++        frow('Capital per refinance', (s) => distCell(s.financing.refinanceCapital)),
++        frow('Deliveries per commitment', (s) => f2(s.financing.deliveriesPerRecord)),
++        frow('Outage-blocked rolls per commitment', (s) => f2(s.financing.blockedRollsPerRecord)),
++        frow('Shortage-missed payouts per commitment', (s) => f2(s.financing.shortageMissesPerRecord)),
++        ...outs.map((k) => frow(`Max outstanding = ${k} (company-games)`, (s) => String(s.financing.maxOutstanding[k] ?? 0))),
++        frow('Financer win rate', (s) => rowCell(s.financing.financers)),
++        frow('Non-financer win rate', (s) => rowCell(s.financing.nonFinancers)),
++      ]),
++      '',
++    );
++  }
++
++  if (sums.some((s) => s.rules.fullStack)) {
++    const fs = sums.filter((s) => s.rules.fullStack);
++    const frow = (label: string, f: (s: SimSummary) => string) => [label, ...fs.map(f)];
++    out.push(
++      '### Full-Stack Integration',
++      '',
++      table(['', ...fs.map(columnName)], [
++        frow('Unlock rate (company-games)', (s) => `${pct(s.fullStack.unlockRate)} (${s.fullStack.unlocks})`),
++        frow('Games with an unlock', (s) => String(s.fullStack.gamesWithUnlock)),
++        frow('CP at unlock', (s) => distCell(s.fullStack.cpAtUnlock)),
++        frow('Round at unlock', (s) => distCell(s.fullStack.roundAtUnlock)),
++        frow('Integrated Deployments per game', (s) => distCell(s.fullStack.integratedPerGame, f2)),
++        frow('Unlocker win rate', (s) => rowCell(s.fullStack.unlockers)),
++        frow('Never-unlocked win rate', (s) => rowCell(s.fullStack.nonUnlockers)),
++      ]),
++      '',
++    );
++  }
++
++  if (sums.some((s) => s.rules.marketEvents)) {
++    const ev = sums.filter((s) => s.rules.marketEvents);
++    const types = [...new Set(ev.flatMap((s) => Object.keys(s.marketEvents.byType)))].sort();
++    out.push(
++      '### Market events',
++      '',
++      table(['', ...ev.map(columnName)], [
++        ['Events per game', ...ev.map((s) => distCell(s.marketEvents.perGame, f2))],
++        ...types.map((t) => [t, ...ev.map((s) => String(s.marketEvents.byType[t] ?? 0))]),
++      ]),
++      '',
++    );
++  }
++
++  out.push(
++    '### Strategy profiles',
++    '',
++    'Win rate of company-games grouped by their production profile (decided games). End-of-game profiles grow with',
++    'success (winners own more buildings), so the opening profile — the two Quick Start clusters — is the cleaner signal.',
++    '',
++  );
++  for (const s of sums) {
++    out.push(
++      `#### ${columnName(s)}`,
++      '',
++      bucketTable('Specialization at end (share of pips in top resource), terciles', s.profile.bySpecialization, s.players),
++      '',
++      bucketTable('Opening specialization, terciles', s.profile.byOpeningSpecialization, s.players),
++      '',
++      bucketTable('Diversity at end (resource types touched)', s.profile.byDiversity, s.players),
++      '',
++      bucketTable('Opening diversity', s.profile.byOpeningDiversity, s.players),
++      '',
++      bucketTable('Innovation Cards bought', s.profile.byCardsBought, s.players),
++      '',
++      bucketTable('AI Factories at end (incl. financed)', s.profile.byFactories, s.players),
++      '',
++    );
++  }
++
++  const problems = sums.filter((s) => s.aborts > 0 || s.invariantViolations.games > 0);
++  if (problems.length > 0) {
++    out.push('### Problems', '');
++    for (const s of problems) {
++      out.push(`**${columnName(s)}**`, '');
++      for (const [k, v] of Object.entries(s.illegal.byKind)) out.push(`- ${v}× ${k}`);
++      for (const e of s.illegal.examples) out.push(`- seed ${e.seed}, turn ${e.turn}, ${e.companyId} (${e.phase}): ${e.actionType ?? 'decideAIAction'} → ${e.error}: ${e.message}`);
++      for (const v of s.invariantViolations.examples) out.push(`- invariant: ${v}`);
++      out.push('');
++    }
++  }
++  return out.join('\n');
++}
++
++// ---------------------------------------------------------------------------
++// Comparison
++// ---------------------------------------------------------------------------
++
++export interface KeyMetric {
++  value: number;
++  /** Standard error, when the metric is a mean or a proportion. */
++  se: number | null;
++  kind: 'pct' | 'num';
++}
++
++function meanMetric(d: Dist): KeyMetric {
++  return { value: d.mean, se: d.n > 1 ? d.sd / Math.sqrt(d.n) : null, kind: 'num' };
++}
++
++function propMetric(p: number, n: number): KeyMetric {
++  return { value: p, se: n > 0 ? Math.sqrt((p * (1 - p)) / n) : null, kind: 'pct' };
++}
++
++/** The headline numbers of a summary, flattened, with standard errors for significance checks. */
++export function keyMetrics(s: SimSummary): Record<string, KeyMetric> {
++  const out: Record<string, KeyMetric> = {
++    'Length, turns (mean)': meanMetric(s.length.turns),
++    'Length, rounds (mean)': meanMetric(s.length.rounds),
++    'Stalls': { value: s.stalls, se: null, kind: 'num' },
++    'Aborted games': { value: s.aborts, se: null, kind: 'num' },
++    'Winner CP (mean)': meanMetric(s.cp.winner),
++    'Runner-up CP (mean)': meanMetric(s.cp.runnerUp),
++    'Close games': propMetric(s.cp.closeGameShare, s.decided),
++  };
++  for (const r of s.winsByCompany) out[`Win share ${r.key}`] = propMetric(r.share, s.decided);
++  for (const r of s.winsBySeat) out[`Win share ${r.key}`] = propMetric(r.share, s.decided);
++  Object.assign(out, {
++    'Clusters / game': meanMetric(s.perGame.clusters),
++    'Standard factories / game': meanMetric(s.perGame.factories),
++    'Connections / game': meanMetric(s.perGame.roads),
++    'Cards bought / game': meanMetric(s.perGame.cardsBought),
++    'Market trades / game': meanMetric(s.perGame.bankTrades),
++    'Robbed / company-game': { value: s.disruption.robbedPerCompanyGame, se: null, kind: 'num' },
++    'Financed upgrades / game': meanMetric(s.financing.perGame),
++    'Companies financing': propMetric(s.financing.companyShare, (s.games - s.aborts) * s.players),
++    'Rounds to complete commitment (mean)': meanMetric(s.financing.roundsToComplete),
++    'Refinance share': propMetric(s.financing.refinanceShare, s.financing.records),
++    'Financer win rate': propMetric(s.financing.financers.winRate, s.financing.financers.n),
++    'Non-financer win rate': propMetric(s.financing.nonFinancers.winRate, s.financing.nonFinancers.n),
++    'Full-Stack unlock rate': propMetric(s.fullStack.unlockRate, (s.games - s.aborts) * s.players),
++    'CP at unlock (mean)': meanMetric(s.fullStack.cpAtUnlock),
++    'Round at unlock (mean)': meanMetric(s.fullStack.roundAtUnlock),
++    'Integrated Deployments / game': meanMetric(s.fullStack.integratedPerGame),
++    'Unlocker win rate': propMetric(s.fullStack.unlockers.winRate, s.fullStack.unlockers.n),
++    'Market events / game': meanMetric(s.marketEvents.perGame),
++  });
++  return out;
++}
++
++/**
++ * Markdown table of deltas from `baseline` to `candidate`. A `*` marks a difference larger than
++ * 1.96 combined standard errors (an unpaired test: conservative when both ran on the same seeds).
++ */
++export function compareTo(baseline: SimSummary, candidate: SimSummary): string {
++  const a = keyMetrics(baseline);
++  const b = keyMetrics(candidate);
++  const fmt = (m: KeyMetric) => (m.kind === 'pct' ? pct(m.value) : f2(m.value));
++  const rows: string[][] = [];
++  for (const k of [...new Set([...Object.keys(a), ...Object.keys(b)])]) {
++    const x = a[k];
++    const y = b[k];
++    if (!x || !y) {
++      rows.push([k, x ? fmt(x) : '—', y ? fmt(y) : '—', '—', '']);
++      continue;
++    }
++    if (x.value === 0 && y.value === 0) continue;
++    const d = y.value - x.value;
++    const se = x.se !== null && y.se !== null ? Math.sqrt(x.se ** 2 + y.se ** 2) : null;
++    const sig = se !== null && se > 0 && Math.abs(d) > 1.96 * se ? '*' : '';
++    const delta = x.kind === 'pct' ? `${d >= 0 ? '+' : ''}${(d * 100).toFixed(1)} pp` : `${d >= 0 ? '+' : ''}${f2(d)}`;
++    rows.push([k, fmt(x), fmt(y), delta, sig]);
++  }
++  return `**${columnName(candidate)} vs ${columnName(baseline)}**\n\n${table(['metric', columnName(baseline), columnName(candidate), 'Δ', 'sig'], rows)}\n`;
++}
+-- 
+2.43.0
+

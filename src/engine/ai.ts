@@ -1,7 +1,30 @@
-import { COSTS, INTEGRATION_COST, RESOURCE_INFO, bundle, companyById, describeBundle, hasBundle, missingFor, pips, sumBundle } from './constants';
+import {
+  COSTS,
+  FINANCING_COST,
+  FINANCING_MAX_OUTSTANDING,
+  INTEGRATION_COST,
+  RESOURCE_INFO,
+  VP_TO_WIN,
+  bundle,
+  companyById,
+  describeBundle,
+  hasBundle,
+  missingFor,
+  pips,
+  rulesOf,
+  sumBundle,
+} from './constants';
 import type { BuildType } from './constants';
 import { bestSetupRoad, bestSetupVertex, productionPips, totalPips, vertexValue } from './evaluation';
-import { outputMultiplier } from './financing';
+import {
+  checkFinancedUpgrade,
+  checkRefinance,
+  financedVertices,
+  isFinanced,
+  legalFinancingVertices,
+  outputMultiplier,
+  refinanceCost,
+} from './financing';
 import { disruptionVictims } from './game';
 import {
   bankRate,
@@ -23,8 +46,11 @@ import { RESOURCES } from './types';
 // reproducible and testable. The AI never reads rivals' hidden hands or cards.
 
 interface Goal {
-  /** 'integration' = save up for a held Full-Stack Integration card. */
-  kind: BuildType | 'integration';
+  /**
+   * 'integration' = save up for a held Expedited Deployment card (legacy id 'integration').
+   * 'financing' = save GPUs for a financed AI Factory upgrade (rules.financing).
+   */
+  kind: BuildType | 'integration' | 'financing';
   cost: ResourceBundle;
   /** Rough priority score used to rank goals. */
   score: number;
@@ -34,22 +60,88 @@ function style(state: GameState, player: number) {
   return companyById(state.players[player].companyId).style;
 }
 
-function bestFactoryVertex(state: GameState, player: number): number {
+/** How much an upgrade of the building at `v` would add: its pips, outage ×0.4, Capital/GPU hexes ×1.15. */
+function upgradeScore(state: GameState, v: number): number {
+  let score = 0;
+  for (const t of state.board.vertices[v].tileIds) {
+    const tile = state.board.tiles[t];
+    if (tile.type === 'barren') continue;
+    score += pips(tile.number) * (t === state.disruptionTile ? 0.4 : 1) * (tile.type === 'capital' || tile.type === 'gpu' ? 1.15 : 1);
+  }
+  return score;
+}
+
+function bestUpgrade(state: GameState, vertices: number[]): { vertex: number; value: number } {
   let best = -1;
   let bestScore = -Infinity;
-  for (const v of legalFactoryVertices(state, player)) {
-    let score = 0;
-    for (const t of state.board.vertices[v].tileIds) {
-      const tile = state.board.tiles[t];
-      if (tile.type === 'barren') continue;
-      score += pips(tile.number) * (t === state.disruptionTile ? 0.4 : 1) * (tile.type === 'capital' || tile.type === 'gpu' ? 1.15 : 1);
-    }
+  for (const v of vertices) {
+    const score = upgradeScore(state, v);
     if (score > bestScore) {
       bestScore = score;
       best = v;
     }
   }
-  return best;
+  return { vertex: best, value: bestScore };
+}
+
+function bestFactoryVertex(state: GameState, player: number): number {
+  return bestUpgrade(state, legalFactoryVertices(state, player)).vertex;
+}
+
+// ---------------------------------------------------------------------------
+// Infrastructure Financing (rules.financing only; Classic decisions never reach this code)
+// ---------------------------------------------------------------------------
+
+/**
+ * Only finance a site that will actually deliver: a financed factory repays its commitment from
+ * its own output, so a weak or blocked site would stall for many rounds.
+ */
+const MIN_FINANCING_SCORE = 6;
+
+function bestFinancingVertex(state: GameState, player: number): { vertex: number; value: number } {
+  return bestUpgrade(state, legalFinancingVertices(state, player));
+}
+
+/** Is a financed upgrade possible in principle (ignoring the turn and the cost) on a site worth financing? */
+function financingInReach(state: GameState, player: number): boolean {
+  if (!rulesOf(state).financing) return false;
+  if (piecesLeft(state, player).factory <= 0) return false;
+  if (financedVertices(state, player).length >= FINANCING_MAX_OUTSTANDING) return false;
+  return bestFinancingVertex(state, player).value >= MIN_FINANCING_SCORE;
+}
+
+/** Finance now: the standard upgrade is out of reach for lack of Capital, but the GPUs and a good site are here. */
+function wantsFinancing(state: GameState, player: number): boolean {
+  if (!checkFinancedUpgrade(state, player).ok) return false;
+  const have = state.players[player].resources;
+  if (have.gpu < FINANCING_COST.gpu || have.capital >= COSTS.factory.capital) return false;
+  return bestFinancingVertex(state, player).value >= MIN_FINANCING_SCORE;
+}
+
+function underOutage(state: GameState, v: number): boolean {
+  const tile = state.board.tiles[state.disruptionTile];
+  return tile.type !== 'barren' && state.board.vertices[v].tileIds.includes(tile.id);
+}
+
+/** Refinanceable factories, cheapest commitment first (ties: the better site). */
+function refinanceable(state: GameState, player: number): number[] {
+  return financedVertices(state, player)
+    .filter((v) => checkRefinance(state, player, v).ok)
+    .sort((a, b) => refinanceCost(state, a).capital - refinanceCost(state, b).capital || upgradeScore(state, b) - upgradeScore(state, a) || a - b);
+}
+
+/** A refinance worth making right now; `endOfTurn` = nothing else is left to do this turn. */
+function refinanceAction(state: GameState, player: number, endOfTurn: boolean): Action | null {
+  const options = refinanceable(state, player);
+  if (options.length === 0) return null;
+  // +1 CP that wins the game on the spot.
+  if (victoryPoints(state, player, true) + 1 >= VP_TO_WIN) return { type: 'REFINANCE', vertex: options[0] };
+  // A commitment stalled under the outage: pay it off instead of waiting.
+  const stalled = options.find((v) => underOutage(state, v));
+  if (stalled !== undefined) return { type: 'REFINANCE', vertex: stalled };
+  // No preferred goal is affordable this turn: put the spare Capital into the commitment.
+  if (endOfTurn) return { type: 'REFINANCE', vertex: options[0] };
+  return null;
 }
 
 function bestClusterVertex(state: GameState, player: number): { vertex: number; value: number } {
@@ -114,11 +206,18 @@ function goals(state: GameState, player: number): Goal[] {
   const hasClusterSite = legalClusterVertices(state, player).length > 0;
   const holdsIntegration = state.players[player].devCards.some((c) => c.type === 'integration');
   // Holding Full-Stack Integration: save toward its cost so the card isn't a dead draw.
-  if (holdsIntegration && left.factory > 0 && hasClusterSite) {
+  const savingForCard = holdsIntegration && left.factory > 0 && hasClusterSite;
+  if (savingForCard) {
     out.push({ kind: 'integration', cost: INTEGRATION_COST, score: 4.2 * st.factories });
   }
   if (left.factory > 0 && legalFactoryVertices(state, player).length > 0) {
     out.push({ kind: 'factory', cost: COSTS.factory, score: 3.4 * st.factories });
+  }
+  // Infrastructure Financing, priced at its own cost: priced as a full upgrade, the factory goal
+  // always loses in exactly the Capital-poor hands financing is for, so the AI would chase Capital
+  // instead of saving GPUs. Never alongside the card goal, so the two don't claim the same GPUs.
+  if (!savingForCard && financingInReach(state, player)) {
+    out.push({ kind: 'financing', cost: FINANCING_COST, score: 3.2 * st.factories });
   }
   if (left.cluster > 0 && hasClusterSite) {
     out.push({ kind: 'cluster', cost: COSTS.cluster, score: 3.6 * st.expansion });
@@ -211,7 +310,7 @@ export function evaluateOffer(state: GameState, player: number, offer: TradeOffe
 
   if (gain - loss >= threshold) {
     const what = goal
-      ? `${goal.kind === 'card' ? 'an Innovation Card' : goal.kind === 'factory' || goal.kind === 'integration' ? 'an AI Factory' : goal.kind === 'cluster' ? 'a new cluster' : 'a new connection'}`
+      ? `${goal.kind === 'card' ? 'an Innovation Card' : goal.kind === 'factory' || goal.kind === 'integration' || goal.kind === 'financing' ? 'an AI Factory' : goal.kind === 'cluster' ? 'a new cluster' : 'a new connection'}`
       : 'its plans';
     return {
       accept: true,
@@ -255,6 +354,7 @@ function chooseDisruption(state: GameState, player: number): Action {
   let bestScore = -Infinity;
   const vps = state.players.map((p) => victoryPoints(state, p.id, false));
   const leaderVp = Math.max(...vps.filter((_, i) => i !== player));
+  const financing = rulesOf(state).financing;
   for (const tile of state.board.tiles) {
     if (tile.id === state.disruptionTile) continue;
     let score = tile.type === 'barren' ? -1 : 0;
@@ -264,7 +364,11 @@ function chooseDisruption(state: GameState, player: number): Action {
       if (!b) continue;
       const mult = outputMultiplier(b);
       if (b.owner === player) score -= p * mult * 3;
-      else score += p * mult * (1 + 0.25 * vps[b.owner]) + (vps[b.owner] === leaderVp ? 1.5 : 0);
+      else {
+        score += p * mult * (1 + 0.25 * vps[b.owner]) + (vps[b.owner] === leaderVp ? 1.5 : 0);
+        // A rival's financed factory counts x1 above; blocking it also stalls its commitment (delays its CP).
+        if (financing && isFinanced(b)) score += p * 0.5 * (1 + 0.25 * vps[b.owner]);
+      }
     }
     if (disruptionVictims(state, tile.id, player).length > 0) score += 1;
     if (score > bestScore) {
@@ -414,6 +518,12 @@ function tradeTowards(state: GameState, player: number, goal: Goal): Action | nu
 function mainPhase(state: GameState, player: number): Action {
   const have = state.players[player].resources;
   const goal = currentGoal(state, player);
+  const financing = rulesOf(state).financing;
+
+  if (financing) {
+    const refinance = refinanceAction(state, player, false);
+    if (refinance) return refinance;
+  }
 
   const card = cardAction(state, player, goal);
   if (card) return card;
@@ -423,6 +533,10 @@ function mainPhase(state: GameState, player: number): Action {
   const savingForIntegration = goal?.kind === 'integration' && sumBundle(missingFor(have, goal.cost)) <= 1;
   if (!savingForIntegration && checkBuild(state, player, 'factory').ok) {
     return { type: 'BUILD_FACTORY', vertex: bestFactoryVertex(state, player) };
+  }
+  // Short of Capital but holding the GPUs: let a good site's own output pay for the upgrade.
+  if (financing && !savingForIntegration && wantsFinancing(state, player)) {
+    return { type: 'BUILD_FINANCED_FACTORY', vertex: bestFinancingVertex(state, player).vertex };
   }
   if (checkBuild(state, player, 'cluster').ok) {
     return { type: 'BUILD_CLUSTER', vertex: bestClusterVertex(state, player).vertex };
@@ -452,6 +566,10 @@ function mainPhase(state: GameState, player: number): Action {
   }
   if (checkBuild(state, player, 'card').ok && (hasBundle(spare, COSTS.card) || handSize > 7)) {
     return { type: 'BUY_CARD' };
+  }
+  if (financing) {
+    const refinance = refinanceAction(state, player, true);
+    if (refinance) return refinance;
   }
   return { type: 'END_TURN' };
 }
