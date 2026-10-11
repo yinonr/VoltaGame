@@ -1617,6 +1617,9 @@ kbd {
   overscroll-behavior: none;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  /* iOS: a long press on the board or a button must not select text or open a callout. */
+  -webkit-touch-callout: none;
+  user-select: none;
 }
 .m-top {
   grid-area: top;
@@ -2107,6 +2110,10 @@ kbd {
     gap: 6px;
   }
   /* Results: the actions stay pinned to the bottom of the dialog while the standings scroll. */
+  /* iOS Safari zooms the page when a focused field's text is under 16px. */
+  .seed-input {
+    font-size: 16px;
+  }
   .winner-modal .modal-actions,
   .intro-modal .modal-actions {
     position: sticky;

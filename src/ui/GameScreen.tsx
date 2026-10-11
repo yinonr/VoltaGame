@@ -351,7 +351,8 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
         <WinnerModal state={state} viewer={humans.length === 1 ? humans[0] : viewer} onNewGame={onNewGame} onDemo={onDemo} onTitle={onExit} onClose={() => setWinnerDismissed(true)} />
       )}
       <div className="toasts" aria-live="assertive">
-        {toasts.map((t) => (
+        {/* The results dialog tells the whole story; a late toast would cover its headline. */}
+        {(state.phase === 'gameOver' && !winnerDismissed ? [] : toasts).map((t) => (
           <div key={t.id} className={`toast ${t.kind}`}>
             {t.text}
           </div>
