@@ -5,6 +5,7 @@ import { legalRoadEdges } from '../engine/rules';
 import type { Action, GameState } from '../engine/types';
 import { RESOURCES } from '../engine/types';
 import { RESOURCE_INFO } from '../engine/constants';
+import { withCleanNames } from './companies';
 
 const SAVE_KEY = 'settlers-of-compute:save:v1';
 
@@ -21,8 +22,9 @@ export function loadSavedGame(): GameState | null {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw) as GameState;
-    if (s.version !== 1 || !s.board || s.phase === 'gameOver') return null;
-    return s;
+    if (s.version !== 1 || !s.board || !Array.isArray(s.players) || s.phase === 'gameOver') return null;
+    // Names are display-only; re-clean them so an edited save cannot break the layout.
+    return withCleanNames(s);
   } catch {
     return null;
   }
@@ -134,19 +136,24 @@ export function useGame() {
           return;
         }
       }
+      // With several humans at one device, "you" is ambiguous: name the company instead.
+      const multiHuman = cur.players.filter((p) => !p.isAI).length > 1;
+      const name = cur.players[actor].name;
       if (action.type === 'MOVE_DISRUPTION' && action.victim !== null && !cur.players[action.victim].isAI) {
         const lost = RESOURCES.find((r) => next.players[action.victim!].resources[r] < cur.players[action.victim!].resources[r]);
-        if (lost) pushToast(`${cur.players[actor].name} took 1 ${RESOURCE_INFO[lost].label} from you.`, 'error');
+        const from = multiHuman ? cur.players[action.victim].name : 'you';
+        if (lost) pushToast(`${name} took 1 ${RESOURCE_INFO[lost].label} from ${from}.`, 'error');
       }
       if (action.type === 'PLAY_CONSOLIDATION') {
         for (const p of cur.players) {
           const n = p.resources[action.resource];
-          if (!p.isAI && p.id !== actor && n > 0) pushToast(`${cur.players[actor].name} consolidated ${RESOURCE_INFO[action.resource].label}: you handed over ${n}.`, 'error');
+          const who = multiHuman ? `${p.name} handed` : 'you handed';
+          if (!p.isAI && p.id !== actor && n > 0) pushToast(`${name} consolidated ${RESOURCE_INFO[action.resource].label}: ${who} over ${n}.`, 'error');
         }
       }
       if (action.type === 'RESPOND_TRADE' && cur.pendingTrade && !cur.players[cur.pendingTrade.from].isAI) {
-        const name = cur.players[actor].name;
-        pushToast(`${name} ${action.accept ? 'accepted' : 'declined'}${action.reason ? ` — ${action.reason}` : '.'}`, action.accept ? 'success' : 'info');
+        const whose = multiHuman ? ` ${cur.players[cur.pendingTrade.from].name}'s offer` : '';
+        pushToast(`${name} ${action.accept ? 'accepted' : 'declined'}${whose}${action.reason ? ` — ${action.reason}` : '.'}`, action.accept ? 'success' : 'info');
       }
       setState(next);
     }, delay);

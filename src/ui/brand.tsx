@@ -9,6 +9,14 @@ export const VOLTA_BRANDING: boolean = import.meta.env.VITE_VOLTA_BRANDING
 export const VOLTA_SITE_URL: string | null = import.meta.env.VITE_VOLTA_URL || null;
 
 /**
+ * The public build's small print. Both facts must stay: the game is not affiliated with or
+ * endorsed by Volta (the public title only says "A concept for Volta", never sponsorship), and it
+ * is an unofficial, Catan-inspired prototype.
+ */
+export const PUBLIC_DISCLAIMER =
+  'Independent creative prototype. Not affiliated with or endorsed by Volta. Unofficial and Catan-inspired; not affiliated with Catan rights holders. All company names are fictional.';
+
+/**
  * Typographic placeholder wordmark. Replace with Volta's official logo asset (SVG from their
  * press kit) before any public use; no official asset was available in this environment.
  */

@@ -22,7 +22,8 @@ import { RESOURCES } from '../engine/types';
 import { SHOW_QUICK_DEMO } from './flags';
 import { ResourceIcon } from './icons';
 import { CompanyDot } from './panels';
-import { VOLTA_BRANDING, VOLTA_SITE_URL, VoltaWordmark } from './brand';
+import { PUBLIC_DISCLAIMER, VOLTA_BRANDING, VOLTA_SITE_URL, VoltaWordmark } from './brand';
+import { choiceOf, profileOf } from './companies';
 
 export function Modal({ title, children, onClose, wide = false, className = '' }: { title: string; children: ReactNode; onClose?: () => void; wide?: boolean; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -555,30 +556,75 @@ export function RulesModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function IntroModal({ onStart, demo }: { onStart: () => void; demo: boolean }) {
+export function IntroModal({ onStart, demo, state, viewer = null }: { onStart: () => void; demo: boolean; state?: GameState; viewer?: number | null }) {
+  // Who "you" are: the viewer's company (custom name included), or Parallax Labs by default.
+  const me = state && viewer !== null ? state.players[viewer] : null;
+  const co = me ? companyById(me.companyId) : COMPANIES[0];
+  const name = me?.name ?? co.name;
+  const rivals = state ? state.players.filter((p) => p.id !== viewer) : [];
+  const draft = state?.phase === 'setup';
   return (
     <Modal title={demo ? 'Quick Demo' : 'New game'} onClose={onStart} className="intro-modal">
       <div className="intro">
+        <div className="intro-you" style={{ ['--co' as string]: co.color }}>
+          <CompanyDot companyId={co.id} size={22} />
+          <div>
+            <span className="intro-you-label">You are</span>
+            <strong className="intro-you-name">{name}</strong>
+            <span className="small muted">
+              {co.sector} · your pieces are <b className="intro-you-color">{profileOf(co.id).colorName}</b>
+            </span>
+          </div>
+        </div>
         <p className="intro-lede">
           Compute is no longer just for giants. Four ambitious AI companies. One emerging market. Build your infrastructure, make your deals, and become the market leader.
         </p>
         {demo ? (
           <ol className="intro-steps">
             <li>
-              You are <b style={{ color: COMPANIES[0].color }}>Parallax Labs</b>, a frontier lab, a few moves from contention midway through the game.
+              You are <b style={{ color: co.color }}>{name}</b>, a frontier lab, a few moves from contention midway through the game.
             </li>
             <li>You've already rolled. Check your resources — you can build right now, or trade for the GPU you need for an AI Factory.</li>
             <li>When you end your turn, three AI rivals play through the real engine. Follow them in the Activity feed.</li>
           </ol>
         ) : (
           <ol className="intro-steps">
-            <li>Each company starts with two Compute Clusters and two Network Connections.</li>
+            <li>
+              {draft
+                ? 'Opening draft: each company places a Compute Cluster and a Network Connection, then again in reverse order.'
+                : 'Each company starts with two Compute Clusters and two Network Connections.'}
+            </li>
             <li>Roll, collect, trade and build. First to 10 Compute Points wins.</li>
+            {state && (
+              <li>
+                {choiceOf(state.rules) === 'compute' ? (
+                  <>
+                    <b>Settlers of Compute</b> rules: Infrastructure Financing and Full-Stack Integration are on.
+                  </>
+                ) : (
+                  <>
+                    <b>Classic</b> rules: no Financing, no Full-Stack Integration.
+                  </>
+                )}
+              </li>
+            )}
           </ol>
+        )}
+        {rivals.length > 0 && (
+          <div className="intro-rivals">
+            <span className="small muted">{rivals.length === 1 ? 'Your rival' : 'Your rivals'}</span>
+            {rivals.map((p) => (
+              <span key={p.id} className="intro-rival" style={{ ['--co' as string]: companyById(p.companyId).color }}>
+                <CompanyDot companyId={p.companyId} size={10} />
+                <span className="intro-rival-name">{p.name}</span>
+                <span className="strategy-tag">{p.isAI ? profileOf(p.companyId).strategy : 'Human'}</span>
+              </span>
+            ))}
+          </div>
         )}
         <div className="modal-actions">
           <button className="btn primary" onClick={onStart}>
-            {demo ? 'Take my turn' : 'Start'}
+            {demo ? 'Take my turn' : 'Play'}
           </button>
         </div>
       </div>
@@ -594,9 +640,12 @@ export function PassScreen({ state, player, onReveal }: { state: GameState; play
       <div className="pass-card" style={{ ['--co' as string]: c.color }}>
         <CompanyDot companyId={p.companyId} size={28} />
         <h1>Pass to {p.name}</h1>
+        <p className="pass-color small">
+          {c.sector} · plays the <b>{profileOf(c.id).colorName}</b> pieces
+        </p>
         <p className="muted">Hands are hidden between players. Only {p.name} should look.</p>
         <button className="btn primary" onClick={onReveal} autoFocus>
-          I'm {c.short} — show my hand
+          I'm {p.name} — show my hand
         </button>
       </div>
     </div>
@@ -631,9 +680,7 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
           <li>The Quick Demo is a real midgame reached by the engine itself, not a scripted mock-up.</li>
           <li>Designed and built with Claude Code.</li>
         </ul>
-        <p className="muted small">
-          Independent, unofficial, Catan-inspired creative prototype. Not affiliated with, sponsored or endorsed by Volta or Catan rights holders. All company names are fictional.
-        </p>
+        <p className="muted small">{PUBLIC_DISCLAIMER}</p>
       </div>
     </Modal>
   );

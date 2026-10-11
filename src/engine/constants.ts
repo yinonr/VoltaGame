@@ -131,6 +131,9 @@ export function sanitizeCompanyName(raw: string | null | undefined, fallback: st
     .normalize('NFC')
     .replace(/[\p{Cc}\p{Co}]/gu, '')
     .replace(/(?![\u200c\u200d])\p{Cf}/gu, '') // bidi overrides, zero-width space, BOM, tags, soft hyphen
+    // Joiners only matter inside emoji sequences and non-Latin scripts: keep them between two
+    // non-ASCII characters, drop them anywhere else.
+    .replace(/[\u200c\u200d]/gu, (j, at: number, str: string) => (at > 0 && str.charCodeAt(at - 1) > 0x7f && str.charCodeAt(at + 1) > 0x7f ? j : ''))
     .replace(/[<>{}\[\]\\`]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
