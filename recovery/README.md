@@ -14,6 +14,18 @@ They have NOT been typechecked, tested, reviewed or merged. No uncommitted work 
 | `s2/fullstack` | `0af6b77e4c74322a315fb6f1f77247bc518a49d8` | Full-Stack milestones/unlock + calibration test |
 | `s2/financing` | `2ca6e10e11a8a0a070eb2b54938bc0aceaebdf1d` | Financing engine/AI (partial; no tests yet) |
 
+## Integration status (Session 3)
+
+| Branch | Status on `claude/new-session-6i54u3` |
+| --- | --- |
+| `s2/financing` | Integrated, then finished: tests, tuning, UI |
+| `s2/identity` | Finished by an agent, merged |
+| `s2/fullstack` | Finished by an agent (engine, AI, tests, calibration), merged |
+| `s2/polish` | Integrated: trade-offer rate limit; feedback layer with its missing CSS written |
+| `s2/qa` | Integrated: invariants, plus fixes for its 5 findings. The scratch probe file was dropped. |
+| `s2/sim` | Integrated: the harness, adapted to the real financing engine |
+| `s2/events` | **Not integrated.** Market events are deferred. Only the bundle and patch here preserve them. |
+
 ## Files
 
 - `session2-agent-branches.bundle`: lossless git bundle with complete history for all seven branches (`git bundle verify` passed).

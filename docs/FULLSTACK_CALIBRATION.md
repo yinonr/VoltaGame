@@ -148,3 +148,24 @@ Even at 6 resources, saving for Integrated Deployment is only break-even for the
 ## Always-on coverage
 
 `src/engine/__tests__/fullstack.test.ts`, block *computer opponents under COMPUTE_RULES*: 24 AI-only COMPUTE_RULES games (seeds 1–24) finish legally and conserve all 19 × 5 resources. After every action, a company meeting all four milestones is unlocked, and nobody unlocks without them. Measured on these seeds: 74 of 96 companies unlock and 10 Integrated Deployments happen in 10 games. The asserted floors are ≥ 48 unlocks and ≥ 3 deployments. Runtime is under 1 s.
+
+## Addendum: rerun with the final Financing constants (lead, Session 3)
+
+The tables above were measured while Financing still cost 2 GPUs with a 3-unit commitment. After it was retuned to 1 Capital + 2 GPUs with a 5-unit commitment (see `docs/BALANCE.md`), `SIM_FULLSTACK=1 npx vitest run fullstack-calibration` (seeds 7000–7199) gives:
+
+| Measure | Classic | Financing only | Compute rules |
+| --- | --- | --- | --- |
+| Rounds, mean / median | 17.5 / 18 | 16.6 / 17 | 16.5 / 17 |
+| Standard upgrades / game | 7.59 | 3.81 | 3.48 |
+| Financed upgrades / game | — | 6.98 | 6.93 |
+| Integrated Deployments / game | — | — | 0.28 |
+
+Full-Stack under the Compute rules:
+
+- 80.0% of companies unlock, in every game;
+- CP at unlock: median 5 (IQR 4–6), with 84.4% of unlocks between 4 and 6 CP;
+- round at unlock: median 11, leaving a median of 5 rounds;
+- 98.5% of winners had unlocked; 16% had deployed.
+
+The thresholds (1 factory / 3 sites / 4 resource types / 4 connected) and the 8-resource recipe are unchanged.
+

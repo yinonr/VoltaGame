@@ -1,190 +1,150 @@
 # Handoff — Settlers of Compute
 
-_Last updated: 2026-10-11, end of session 1 (the mobile + deployment continuation, then the Volta branding + special-cards work on a feature branch)._
+_Last updated: 2026-10-11, end of Session 3 (recover, integrate, finish). Interview: Monday, October 12, 2026._
 
-## ⚠️ Two branches: read this first
+## Status in one paragraph
 
-| Branch | Commit | What it is | Deployed? |
-| --- | --- | --- | --- |
-| `main` (= `claude/new-session-4osyq1`) | `37c229b` | The stable interview build: V1 game, mobile layout, Quick Demo | **Yes**, live at https://yinonr.github.io/VoltaGame/ |
-| **`claude/volta-branding`** | see `git log -1 origin/claude/volta-branding` | New Game–first title screen (Quick Demo hidden, `#demo`), staged Volta co-branding (approved for the prototype; volta.com link), the Full-Stack Integration card, and the Volta cards spec | **No.** Do **not** merge into `main` or deploy without the owner's approval. |
+All Session 2 agent work was recovered, finished and integrated into **`claude/new-session-6i54u3`**. Market events are the one exception: they are preserved but deferred. The branch now has:
 
-### Feature-branch work (`claude/volta-branding`)
+- **Infrastructure Financing**, tuned by simulation;
+- **company naming and identity**, with a clear YOU tag;
+- **Full-Stack Integration** with Integrated Deployment;
+- **game-feel feedback** and **AI trade-offer rate limiting**;
+- a **QA invariant suite** and a **simulation harness**.
 
-- **Staged Volta branding: done and tested, not public.**
-  - *Title screen:* "Brought to you by VOLTA" under the title, between hairline rules, plus a spec-sheet micro-label line. The tagline is now "The race to build the AI economy."
-  - *Victory screen:* a closing band with "The next generation of AI runs on infrastructure." and "Brought to you by VOLTA". It shows an optional "Visit Volta →" link only when `VITE_VOLTA_URL` is set; no URL is hard-coded, because the official address couldn't be verified from this environment.
-  - *Elsewhere:* subtle industrial details (corner registration marks, monospace panel labels, a hairline board plate) under `html.brand-volta`. No pop-ups and no in-turn mentions.
-  - *Gate:* `src/ui/brand.tsx`. Branding is **on in `npm run dev`** and **off in production builds** unless `VITE_VOLTA_BRANDING=on`. Even if this branch were merged, the public build would show no attribution until that variable is set in the deploy workflow.
-  - *Wordmark:* "VOLTA" is a **typographic placeholder**. Replace it with the official SVG logo once Volta approves (one component, `VoltaWordmark`).
-  - *Disclaimer:* the branded title screen says "Concept build: Volta branding is shown for review and is not approved for public release."
-  - *Tested:* Playwright at 1440×900 and 390×844, branded and unbranded. The branded build shows the treatments; the unbranded production build shows none. Winner screen and title both checked. No errors.
-- **Full-Stack Integration card: done and tested** (opt-in, Custom game → "Special cards (beta)").
-  - It deploys an AI Factory straight onto a new network site for 1 Land + 3 Capital + 2 GPUs, worth +2 CP.
-  - It has engine logic, AI play logic, desktop and mobile UI (placement mode plus confirm on phones), and flavor text.
-  - 8 new tests: **61 passing in total**. Browser-checked on desktop and at 390×844.
-  - An independent review found the AI played only about 12% of drawn copies. The AI now saves toward the card's cost and builds connections toward a site when it holds one; the play rate is **25%** over 200 seeded games, with game length and win split unchanged. A regression test asserts at least 18%.
-  - The default deck is unchanged (25 cards), so the Quick Demo, AI seeds and all earlier tests behave exactly as before. The mobile regression suite was re-run on this branch and passed.
-- **Infrastructure Financing card: designed, NOT implemented.** The full spec and step-by-step implementation plan are in `docs/VOLTA_SPECIAL_CARDS.md`. Two independent adversarial reviewers checked the spec against the engine. All 15 of their findings are incorporated, among them the circular AI rule, immutability of Building objects, phantom shortages, six "factories produce double" call sites, Refinance UI placement, and corrected pip math.
+On the latest commit: **163 tests pass** and 4 opt-in simulations are skipped; typecheck and the public and branded builds pass; GitHub Actions CI is green. Full games were played through the real UI at 1440×900, 390×844, 375×667 and 844×390, with no console errors and no overflow.
 
-### Entry experience (changed on this branch)
+**`main` and the live site are unchanged.** The release candidate is ready for the owner's review and needs the owner's approval to publish (see "Publish" below).
 
-- **New Game is now the primary title-screen action** ("▶ New Game — Found your AI company · You vs. 3 AI rivals"). Players start their own company on turn one.
-- **Quick Demo is hidden from the entry flow.** That covers the title button, the winner-screen "Replay Quick Demo" and the mobile menu item. Its implementation, deterministic scenario and tests are all preserved. Open the site with `#demo` to show it, e.g. `…/VoltaGame/#demo` (`src/ui/flags.ts`).
-- Custom game, pass-and-play, autosave/continue, How to play and About are unchanged.
+## Branches
 
-### Volta branding status
+| Branch | Commit | What it is |
+| --- | --- | --- |
+| `main` | `37c229b` | Live at https://yinonr.github.io/VoltaGame/ (Session 1 build). Untouched. |
+| `claude/volta-branding` | `db08323` | Session 1 feature branch. Untouched; fully contained in the session branch. |
+| **`claude/new-session-6i54u3`** | latest pushed (`git log -1 origin/claude/new-session-6i54u3`) | **The release candidate.** A fast-forward of `main`. |
+| `s2/*` (7 branches) | local only | Session 2 agent branches, preserved in `recovery/` as a bundle plus patches. `recovery/README.md` explains how to restore them and what was integrated. |
 
-- **Approved by the owner for the interview prototype:** the creative direction, "Brought to you by Volta", the tagline "The race to build the AI economy.", and the victory line "The next generation of AI runs on infrastructure."
-- **Not** Volta's authorization for public sponsorship claims. The production gate stays: production builds remain unbranded unless `VITE_VOLTA_BRANDING=on`.
-- **Website:** `https://volta.com` is configured in `.env.development` (used by `npm run dev`) and `.env.branded` (used by `npm run build:branded`). The branded victory screen's "Visit Volta →" was verified: `href="https://volta.com"`, new tab, `noopener noreferrer`. volta.com itself can't be loaded from the build environment.
-- **Wordmark:** still the typographic "VOLTA" placeholder until an approved logo asset exists.
+## What works (verified)
 
-```bash
-npm run dev                                   # branded dev build with the volta.com link
-npm run build:branded && npm run preview      # branded production-style build at /VoltaGame/
-npm run build                                 # public build: unbranded (what main deploys)
-```
-
-## Next development session: order of work
-
-1. **Infrastructure Financing (first).** Work on `claude/volta-branding`, following `docs/VOLTA_SPECIAL_CARDS.md`, including its "Final pre-implementation check".
-   1. Game state, actions, rules and scoring: `Building.financed`, `PLAY_FINANCING`, `REFINANCE`, `checkPlayCard('financing')`, `checkRefinance`, and the `scoreBreakdown` semantics.
-   2. Deferred production commitments with correct accounting: rule 2's pending deliveries, the shortage gate, never mutating a Building, and `outputMultiplier` at every call site.
-   3. **Comprehensive automated tests before any UI.** The full test list is in the spec.
-   4. AI decisions: when to finance, when to refinance, and outage targeting.
-   5. Desktop and mobile interactions: placement mode, the board badge, and a Commitment row with Refinance.
-   6. Test the full card lifecycle in the browser at 1440×900 and 390×844.
-2. **Balance both Volta cards (second).** Run many seeded AI-only games with both cards on, and compare game length, winners, card usage and strategic value against the standard game. Check the cards are interesting but not overpowered. Decide whether they should join the default deck instead of staying behind Custom game → "Special cards (beta)". Keep determinism and the regression coverage, and re-baseline seeds deliberately.
-3. **Reconsider onboarding (third).** Look at how beginners learn from turn one, and prefer lightweight contextual hints over a fixed midgame demo. Keep Quick Demo as an internal/testing feature (`#demo`) unless there's a compelling reason to restore it.
-4. **Online multiplayer (fourth).** Keep `docs/MULTIPLAYER_PLAN.md`, and don't start until the Volta mechanics and core experience are polished.
-
-**Throughout:** keep `main` and the live site unchanged unless the owner approves a merge.
-
-## Where things are
-
-- **Repository:** https://github.com/yinonr/VoltaGame (public)
-- **Working branch:** `claude/new-session-4osyq1`
-- **`main`:** fast-forwarded to the working branch. Both point at the same commit after this docs update; run `git log -1 origin/main` for the exact SHA.
-- **Code checkpoints:**
-  - `92d72d9` foundation
-  - `2e7d24f` playable core + tests
-  - `fc526fa` competitive feel + docs + workflows
-  - `1ac2521` demo + polish
-  - `1628285` docs
-  - **`d120891` mobile touch layout** (latest code commit)
-  - a docs commit on top of `d120891`: HANDOFF, MULTIPLAYER_PLAN, README, GAME_DESIGN
-- **CI:** the `CI` workflow passed on branch pushes `fc526fa` and `1ac2521`. On `main` (`d120891`) the deploy workflow passed `npm ci`, `npm test` and `npm run build` on ubuntu-latest.
-
-## Deployment status: deployed
-
-- The owner enabled GitHub Pages (Source: GitHub Actions) on 2026-10-11.
-- Deploy workflow run **38099492162** (attempt 2, commit `1d5c4be`) passed every step: `npm ci`, `npm test`, build, `configure-pages`, upload, and `deploy-pages`. It reported *"Reported success! … environment url: https://yinonr.github.io/VoltaGame/"*.
-- **Live URL:** https://yinonr.github.io/VoltaGame/. Every push to `main` redeploys automatically.
-- **Not verified from here:** this cloud environment cannot reach `*.github.io` (egress policy), so success is confirmed from the GitHub Actions deploy log only. The owner should load it once on desktop and once on an iPhone.
-
-## Feature status
-
-| Feature | Status |
+| Feature | Evidence |
 | --- | --- |
-| Full Catan-style rules engine (board, production, building, trading, Grid Disruption, Innovation Cards, bonuses, win) | Done, 53 tests |
-| 3 deterministic AI rivals, AI→human and AI→AI offers | Done |
-| Quick Start, manual snake draft, Quick Demo (seed 392, four-way race) | Done |
-| Local pass-and-play (2–4 seats, human/AI mix), spectate, autosave | Done |
-| Desktop layout (1280–1920 wide) | Done, unchanged by the mobile work |
-| **Phone layout, portrait + landscape** | **Done**, tested in emulation (see below) |
-| GitHub Pages deploy | **Deployed**: https://yinonr.github.io/VoltaGame/ (per the Actions deploy log) |
-| Online multiplayer | **Not started.** Plan in `docs/MULTIPLAYER_PLAN.md` |
+| **New Game setup:** name your company, see the rivals, choose Settlers of Compute or Classic; Enter starts | Agent browser run, 125/125 checks at 3 viewports; lead's full-game runs |
+| **Identity:** YOU tag, "your color", rival strategies, turn banner, leader crown, Leveraged and Full-Stack badges; custom names in log, toasts, intro and pass screen | Same, plus `names.test.ts` |
+| **Infrastructure Financing:** standard vs financed choice, placement, commitments, the outage stall, Refinance, board badge, '+1 repaid' chips | `financing.test.ts` (20 tests); lifecycle scripts at 1440×900 and 390×844; financing and refinancing during full UI games on desktop and two phone sizes |
+| **Full-Stack Integration:** four milestones, permanent unlock (even on a rival's turn), Integrated Deployment at 8 resources, progress panel | `fullstack.test.ts` (25 tests); calibration (600 games) |
+| **AI** uses Financing (7.5 upgrades per game), refinances, targets financed factories with the outage, unlocks and uses Full-Stack | Simulations: 0 stalls and 0 illegal moves in 800 games |
+| **Fewer interruptions:** AI offers to a human dropped from 10.9 to 2.2 per game | `trade-offers.test.ts` (30 seeds), with an all-AI fingerprint check |
+| **Feedback:** dice tumble, lit hexes, BLOCKED flash, your ringed payout chips, '+N' gains, build pulses, rival ticker | Browser screenshots on desktop and phone |
+| **Classic Mode and old saves** behave exactly as before: same AI decisions, same Quick Demo, 25-card deck | Seeded fingerprint tests, old-save tests in `financing.test.ts` and `invariants.test.ts`, all earlier tests unchanged |
+| **Public concept branding:** "A concept for Volta" plus the disclaimer; no sponsorship claim; the private branded preview is unchanged | Agent browser check of the public and branded titles |
 
-## Mobile functionality completed
+## Tests and builds (actual results)
 
-- **When it applies:** the touch layout appears when `(max-width: 820px), (max-height: 520px)` matches.
-  - In portrait it shows player chips, the instruction banner, the zoomable board, a dock with dice and Roll / End turn, the resource bar, and tabs (Build · Trade · Cards · Activity · Market).
-  - In landscape the board fills the left side and the controls sit in a right column.
-- **Zoom:** fit, 1.5× and 2.2× via **+ / −** buttons, with native one-finger panning. Pinch is disabled inside the board so the page never zooms by accident.
-- **Tap, then confirm:** every placement, plus the Grid Disruption target, is selected first and committed with **Confirm**, so a mis-tap never builds. Touch hit areas are enlarged.
-- **Sheets and dialogs:** sheets scroll internally, dialogs fit the screen (steppers reflow, the results table scrolls sideways), and toasts sit under the banner.
-- **iOS details:** safe-area insets, `100dvh`-style fixed layout, `viewport-fit=cover`, theme color.
+- `npm test`: **163 passed, 4 skipped** (the skipped ones are opt-in: fixture generator, Financing balance probe, Full-Stack calibration, long simulation).
+- `npm run build` and `npm run build:branded`: pass.
+- **GitHub Actions CI** (`ci.yml`): green on every pushed commit of the branch, including the latest.
+- **Browser QA** (Playwright with headless Chromium, public production build): complete games driven through the UI as the human at 1440×900, 390×844, 375×667 and 844×390. These covered rolls, 7s, discards, outage moves, declined offers, financing and refinancing, and a winner screen, with no console errors and no horizontal overflow.
+- **Not done:** a physical iPhone, and real Safari.
 
-## Tests actually performed
+## Balance (details in `docs/BALANCE.md`)
 
-- `npm test`: **53 passed**, 1 skipped (the opt-in QA fixture generator).
-- `npm run build` passes locally and on GitHub Actions.
-- Mobile, using Playwright with headless Chromium and `isMobile` + `hasTouch` + an iPhone user agent, every interaction done with `tap()`, at **390×844, 375×667 and 844×390**. Every step passed at all three sizes with no console errors and no page overflow:
-  1. Load the game and start the Quick Demo.
-  2. Inspect the hand; zoom in (the board becomes scrollable) and back out.
-  3. Trade → Rival companies → 1 Power for 1 GPU → Ambulo accepts with a reason; the dialog fits the screen.
-  4. Build → AI Factory → tap a cluster → confirm bar → Confirm → factory built.
-  5. Menu sheet dismissed by tapping the backdrop; Market and Activity sheets open and close.
-  6. End turn → three AI turns run (offers handled by Decline) → back to the human.
-  7. Corner and edge selection with confirm, in the manual opening draft.
-  8. A 7 with 9 cards: discard dialog → tap a hex → confirm ("Knock out GPUs 11? Rivals here: Ambulo.") → steal.
-  9. Pass-and-play: the pass screen appears for the second human.
+| Measure (Compute rules unless noted) | Value |
+| --- | --- |
+| Game length | 16.7 rounds (Classic 18.1); no stalls; close games 62.5% |
+| Financing as proposed (2 GPUs, 3 units) | A debt-free company won only 10.5%, so it was retuned |
+| Financing as shipped (1 Capital + 2 GPUs, 5 units, cap 2) | The debt-free company wins 22.6% over 1,200 games (fair 25%) |
+| Full-Stack unlocks | 80% of companies, median 5 CP, round 11, with 5 rounds left |
+| Integrated Deployments | 0.3–0.4 per game |
+| Specialists (most specialized third of openings) | Win 18.7% (Classic 21.7%) |
+| Helixa, the innovation-focused rival | Wins 33% |
 
-  One 390×844 run stalled on its final pass-and-play step. That game uses a random board, and the test script didn't handle one random state (likely a discard dialog after a 7). A re-run passed every step.
-- **Full game on a phone viewport:** at 390×844, a scripted player using only touch controls played a full game against Turbo AI to the results screen (18 turns, 35 s), with no errors.
-- **Desktop regression:** at 1440×900 the Quick Demo trade → factory → AI-round path still works with no errors (about 10 s per AI round at Normal speed).
-- **Not done:** testing on a physical iPhone. Emulation does not reproduce real Safari toolbar behavior, momentum feel or exact touch precision.
+**Known shift:** Financing roughly halves Innovation Card purchases and Priority Access, because GPUs go to factories.
 
-## Known issues / remaining mobile work
+## Final design numbers
 
-- Not yet verified on a real iPhone. Check:
-  - that the Safari address bar collapsing doesn't hide the tab bar;
-  - that momentum panning feels right at 2.2×;
-  - that corner targets at fit zoom are comfortable. If they aren't, zoom to 1.5× by default when a build mode starts.
-- In the trade dialog on narrow phones, each resource's −/+ buttons stack vertically. They are usable, but the dialog is tall and scrolls.
-- AI rivals send a fair number of trade offers to the human (about 12 in an 18-turn game when you always decline). Each one pops a dialog. Consider rate-limiting offers to humans (for example, at most one per rival every three turns).
-- There is no pinch-to-zoom gesture; zooming is by buttons, by design.
-- The deploy workflow uses `actions/*@v4/v5`, which print Node 20 deprecation warnings. These are harmless; bump the versions when convenient.
+| Item | Value |
+| --- | --- |
+| Standard AI Factory | 3 Capital + 2 GPUs: +1 CP and double output now |
+| Financed AI Factory | 1 Capital + 2 GPUs: 1 CP and cluster output until it repays 5 units of its own output; at most 2 outstanding; Refinance at 1 Capital per unit left (not a card play) |
+| Outage vs. Financing | A blocked hex repays nothing; the badge turns red; the AI targets financed factories |
+| Full-Stack milestones | 1 operational factory + 3 sites + 4 resource types + a 4-connection network (all at once); permanent once unlocked |
+| Integrated Deployment | 1 Power + 1 Networking + 1 Land + 3 Capital + 2 GPUs: a full factory on an open network site, +2 CP, repeatable |
+| Market events | Not in this build (prototype preserved on `s2/events`) |
 
-## Online multiplayer recommendation (summary)
+## Publish (owner action, needs approval)
 
-Use **Cloudflare Workers + one Durable Object per room**:
+`main` is an ancestor of the session branch, so this is a plain fast-forward.
 
-- The room object imports the existing `src/engine` and is authoritative. It validates every action with `applyAction` and checks that the sender is the acting player (`getActingPlayer`).
-- It keeps the secret state (RNG, deck, rival hands) server-side and sends each player a redacted `viewFor(state, seat)` over WebSockets.
-- It persists state so refreshes and reconnects resume the same seat via a token stored in `localStorage`, and it runs AI seats and timeouts with alarms.
-- The frontend stays on GitHub Pages. Rooms live at `#/room/:id`.
-- It needs a free Cloudflare account plus the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` GitHub secrets.
-- Estimate: about 5–6 h. Full details, alternatives and security notes are in `docs/MULTIPLAYER_PLAN.md`.
+1. On GitHub, open a pull request from `claude/new-session-6i54u3` into `main` and review the changes. You can also skip the PR and merge locally:
 
-## Next steps (for the 9:40 PM session)
+   ```bash
+   git fetch origin
+   git checkout main
+   git merge --ff-only origin/claude/new-session-6i54u3
+   git push origin main
+   ```
 
-1. **Owner:** open https://yinonr.github.io/VoltaGame/ on an iPhone and check the mobile items listed above.
-2. Fix anything found on the real device. Keep it small: CSS and layout only.
-3. Implement online multiplayer following `docs/MULTIPLAYER_PLAN.md`, in order:
-   1. `viewFor` + leak tests;
-   2. a `server/` Worker + `RoomDO`;
-   3. the client lobby + `useOnlineGame` + reconnect;
-   4. the deploy workflow + a two-browser test.
+2. Merging to `main` runs **Deploy to GitHub Pages** (`deploy.yml`: `npm ci`, `npm test`, `npm run build`, then upload). It takes about 1–2 minutes; watch the Actions tab until it's green.
+3. Open https://yinonr.github.io/VoltaGame/ with a hard refresh, on desktop and on your phone. Check:
+   - the title shows **"A concept for Volta"**;
+   - New Game asks for your company name;
+   - "Settlers of Compute" is preselected;
+   - the Build panel shows "AI Factory · financed" once you have a cluster and the resources.
+4. **Optional cleanup before merging:** delete `recovery/` (about 0.3 MB of backup artifacts) if you don't want it on `main`. It's harmless either way.
+5. **Rollback:** revert the merge on `main` (GitHub "Revert" on the PR, or `git revert`), which redeploys the previous build. Visitors' autosaves stay loadable either way.
 
-   The owner must first create a Cloudflare account and add the two GitHub secrets.
-4. Keep local modes (Quick Demo, vs AI, pass-and-play) untouched and green.
+Players see a New Game setup (name, rivals, rules). The default game uses Infrastructure Financing and Full-Stack Integration, Classic is one click away, and the gameplay feedback is livelier. Old in-progress saves continue as Classic games.
+
+## Known issues and risks
+
+- **Testing gaps:**
+  - No physical iPhone test. Check the Safari toolbar against the tab bar, panning feel at 2.2×, and the sticky Start row on the setup screen.
+  - The rival ticker and toasts were seen in screenshots but not tuned on a real phone.
+- **Setup screen:** on phones the Classic rules card sits below the sticky Start button, so you scroll to switch modes.
+- **Copy and display:**
+  - Long custom names are truncated in phone chips (the full name shows in the Market sheet).
+  - The IntroModal says "Four ambitious AI companies" even in 2–3 seat custom games.
+- **Victory screen:** shows standings (with financed factories separated) but not yet a list of accomplishments such as Full-Stack or financing totals.
+- **Balance shifts:**
+  - Integrated Deployment is rare in AI hands (0.3–0.4 per game). A human can use it more.
+  - Innovation Cards and Priority Access are used about half as often under the Compute rules.
+- **Market events:** not merged.
+- **Recovery branches:** the `s2/*` branches exist only in this container and in `recovery/` on GitHub.
+
+## Next session (priority order)
+
+1. **Owner review on a real phone**, then publish (see above). Fix only what that review finds.
+2. **Victory screen accomplishments** from real state: Full-Stack turn, financed factories, Longest Network, Priority Access.
+3. **Market events:** restore `s2/events` from `recovery/`, update it to the 5-unit commitment and the ceiling of 6, keep it behind a Custom-game "Market events (experimental)" toggle, and rerun the balance probe.
+4. **Human playtests of the Compute rules.** Watch the card economy and how often humans use Integrated Deployment; consider the 7-resource recipe only if it is rarely used.
+5. **Onboarding:** light contextual hints on the first turns (for example the first financed upgrade, the first milestone).
+6. **Online multiplayer**, last (`docs/MULTIPLAYER_PLAN.md`).
 
 ## Commands
 
 ```bash
-npm install
-npm run dev            # http://localhost:5173 (open on a phone via your LAN IP with `npm run dev -- --host`)
-npm test               # Vitest engine suite
-npm run build          # tsc -b && vite build → dist/
-npm run preview        # http://localhost:4173/VoltaGame/
-QA_GEN=/tmp/qa npx vitest run qa-fixtures   # write saved-game fixtures for browser QA
+npm install && npm test && npm run build        # baseline
+npm run dev                                     # branded dev build (VOLTA_BRANDING on)
+npm run build:branded && npm run preview        # branded production-style build
+QA_GEN=/tmp/qa npx vitest run qa-fixtures       # saved-game fixtures, incl. qa-financing.json (Compute rules)
+FIN_BALANCE=/tmp/fin.txt N=300 S0=12000 npx vitest run financing-balance
+SIM=1 SIM_CONFIGS=classic,compute SIM_GAMES=200 npx vitest run simulate
+SIM_FULLSTACK=1 npx vitest run fullstack-calibration
 ```
 
-Browser QA in this cloud environment:
+**Browser QA in the cloud container:**
 
-- Chromium is at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`.
-- Install `playwright-core@1.56` outside the repo and launch it with `executablePath`.
-- For mobile, create the context with `{ viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true }` and use `locator.tap()`. SVG targets need `{ force: true }`.
-- To load a fixture, set `localStorage['settlers-of-compute:save:v1']` and tap **Continue saved game**.
+- Chromium is at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`; use `playwright-core@1.56` installed outside the repo.
+- Load a fixture into `localStorage['settlers-of-compute:save:v1']` and press **Continue saved game**.
+- On phones, use `isMobile` + `hasTouch` and `tap()`; SVG targets need `{ force: true }`.
+- Run `pkill -f "vite preview"` as its own command.
 
-## Architecture notes and pitfalls
+## Architecture notes
 
-- `applyAction` is the only state transition, and `getActingPlayer` decides who acts. Both the AI loop (`useGame`) and the UI key off it. A future server must use the same pair.
-- `GameScreen` computes all state and handlers once, then renders either the desktop JSX or the touch JSX (`compact`). Both share `boardEl` and `modalsEl`, so put new UI behavior in the shared part.
-- On touch, board taps go through `pending` → confirm. On desktop they act immediately (`doVertex` / `doEdge` / `doTile`).
-- The Vite `base` is `/VoltaGame/` for `build` and `preview`.
-- Vitest 5, Vite 8 and plugin-react 6 are pinned together.
-- `pkill -f "vite preview"` inside a compound shell command can kill the shell itself; run it on its own.
-- This environment cannot reach `*.github.io`, the GitHub Pages API, or a16z. Use GitHub Actions logs (GitHub MCP) to verify deploys.
+- **State changes:** `applyAction` is the only state transition, and `getActingPlayer` says who acts.
+- **Feature modules:** `financing.ts`, `fullstack.ts` and `events.ts` implement their reducer cases through `mutate.ts` helpers, which avoids import cycles.
+- **Rules flags:** gate every new mechanic on `rulesOf(state)`, so Classic stays byte-for-byte identical. The seeded fingerprint tests check this.
+- **Immutability:** never mutate a Building; always write a new object. The invariant suite deep-freezes every state.
+- **Factory output:** `outputMultiplier(b)` is the only place where "factory = double output" lives.
+- **UI:** `GameScreen` computes once and renders the desktop or the touch layout. Strategy panels are in `src/ui/strategy.tsx`, feedback in `src/ui/feedback.tsx`, identity in `src/ui/companies.ts` and `NewGameScreen.tsx`, and per-stream CSS in `src/ui/styles/*.css`.

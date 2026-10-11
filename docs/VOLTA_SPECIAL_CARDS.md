@@ -1,5 +1,7 @@
 # Volta Special Cards — Design Specification
 
+> **Superseded (Session 3).** Infrastructure Financing shipped as a deliberate build choice, not a card, and Full-Stack Integration as an earned status. See `docs/STRATEGIC_SYSTEMS.md` and `docs/BALANCE.md`. The card called "Full-Stack Integration" below is now the legacy **Expedited Deployment** card (Custom game → "Special cards (beta)"). This document is kept for its reviewed accounting design.
+
 _Status (branch `claude/volta-branding`):_
 
 - **Card A, Full-Stack Integration: IMPLEMENTED and TESTED.** It has engine logic, AI logic, desktop and mobile UI, and 8 automated tests, and was browser-checked on desktop and at 390×844.

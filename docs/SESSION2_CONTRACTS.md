@@ -1,6 +1,6 @@
 # Session 2 — Engine contracts and file ownership
 
-_Lead-owned. Written before the parallel work streams started (2026-10-11). Each stream works in its own git worktree; the lead merges them into `claude/new-session-6i54u3`._
+_Lead-owned. Written before the parallel work streams started (2026-10-11). The streams were integrated in Session 3. The final rules and numbers live in `docs/STRATEGIC_SYSTEMS.md` and `docs/BALANCE.md`; this file records the original contracts and file ownership._
 
 ## Product direction (owner's Session 2 directive, condensed)
 
@@ -36,10 +36,10 @@ _Lead-owned. Written before the parallel work streams started (2026-10-11). Each
 
 | Constant | Initial value |
 | --- | --- |
-| `FINANCING_COST` | 2 GPUs |
-| `FINANCING_COMMITMENT` | 3 units |
+| `FINANCING_COST` | 1 Capital + 2 GPUs (was 2 GPUs; tuned, see `docs/BALANCE.md`) |
+| `FINANCING_COMMITMENT` | 5 units (was 3; tuned) |
 | `FINANCING_MAX_OUTSTANDING` | 2 financed factories per company at once |
-| `FINANCING_MAX_COMMITMENT` | 5 units (ceiling after market-event extensions) |
+| `FINANCING_MAX_COMMITMENT` | 6 units (ceiling after market-event extensions) |
 | `INTEGRATED_DEPLOYMENT_COST` | 1 Power + 1 Networking + 1 Land + 3 Capital + 2 GPUs = 8 resources (vs. 9 via cluster + upgrade) |
 | `MAX_COMPANY_NAME` | 24 characters |
 

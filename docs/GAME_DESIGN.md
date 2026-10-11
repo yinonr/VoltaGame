@@ -156,13 +156,43 @@ The **touch layout** applies when `(max-width: 820px), (max-height: 520px)` matc
 
 The **desktop layout** (three columns) is unchanged.
 
-## Volta special cards and staged branding (feature branch)
+## Settlers of Compute rules (Session 3)
 
-- **Special cards:** an opt-in game option (`voltaCards`) shuffles Volta special cards into the Innovation deck. With it off, which is the default, the 25-card deck, and therefore the Quick Demo and AI test seeds, are unchanged.
-  - **Full-Stack Integration** is implemented: an AI Factory goes straight onto a new network site for 1 Land + 3 Capital + 2 GPUs (+2 CP).
-  - **Infrastructure Financing** is specified: an upgrade for 2 GPUs, financed by the factory's next 3 bonus units, with its extra CP deferred until delivered. It is not implemented yet.
-  - Full rules, balance notes and implementation steps are in `docs/VOLTA_SPECIAL_CARDS.md`.
-- **Branding:** co-branding ("Brought to you by Volta", a victory-screen closing line, restrained industrial UI details) is gated by `VOLTA_BRANDING` in `src/ui/brand.tsx`. It is on in development and off in production builds unless `VITE_VOLTA_BRANDING=on`, so public builds never show an unapproved attribution.
+New games default to the **Settlers of Compute** rules (`COMPUTE_RULES`); **Classic** stays one click away, and old saves load as Classic. Full rules, constants, AI and UI are in `docs/STRATEGIC_SYSTEMS.md`; the balance evidence is in `docs/BALANCE.md`.
+
+- **Infrastructure Financing:**
+  - an intentional alternative to the standard upgrade: 1 Capital + 2 GPUs now;
+  - a 5-unit commitment repaid from the factory's own output, with cluster-level output and CP until repaid;
+  - at most 2 outstanding;
+  - Refinance at 1 Capital per unit left.
+- **Full-Stack Integration:**
+  - a permanent status earned by holding four milestones at once: an operational factory, 3 sites, 4 resource types and a 4-connection network;
+  - it unlocks repeatable **Integrated Deployment**: a full AI Factory on an open site for 8 resources, +2 CP.
+- **Legacy card:** the old special card is now **Expedited Deployment** (Custom game → "Special cards (beta)").
+
+## Company identity and game feel (Session 3)
+
+- **New Game setup:**
+  - name your company (sanitized, 24 characters at most, unique among the seats);
+  - see the three rivals and their strategies (Helixa: innovation; Ambulo: expansion; Stacksmith: factories);
+  - choose the rules.
+- **In game:**
+  - a **YOU** tag with "your color" on your scoreboard row, phone chip and top bar;
+  - one-word rival strategies, a company-colored turn banner and a leader crown;
+  - "Leveraged ×N" and "Full-Stack" badges.
+- **Feedback** (`src/ui/feedback.tsx`, CSS only, off under reduced motion):
+  - dice tumble and settle;
+  - producing hexes light up and a blocked hex flashes;
+  - your payout chips are ringed in your color and gains show as "+N" on your hand;
+  - build pulses with "+N CP";
+  - success toasts for your milestones;
+  - a rate-limited ticker of rivals' notable moves and victory threats.
+- **Fewer interruptions:** AI rivals approach a human with a trade offer only on staggered rounds, and only when the human is strictly their best partner. In a 30-seed test this cut offers from 10.9 to 2.2 per game; all-AI play is unchanged.
+
+## Staged branding
+
+- **Private branded preview:** "Brought to you by Volta", the victory line and the industrial UI details stay gated by `VOLTA_BRANDING` (`src/ui/brand.tsx`). They are on in `npm run dev` and `npm run build:branded`, and off in the public build.
+- **Public build:** the title shows "A concept for Volta" with the disclaimer "Independent creative prototype. Not affiliated with or endorsed by Volta." It also keeps the unofficial, Catan-inspired disclaimer.
 
 ## Deliberate abstractions
 
@@ -192,4 +222,4 @@ The **desktop layout** (three columns) is unchanged.
 - Playing non-Priority cards before the roll.
 - A post-game timeline.
 - Sound.
-- A mobile-optimized layout.
+- Market events (Credit Crunch / Compute Boom): a prototype is preserved on `s2/events`, but not merged.

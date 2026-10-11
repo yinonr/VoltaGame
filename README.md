@@ -14,10 +14,10 @@ It is a playful abstraction, not a simulation of any real company's products, fi
 
 | Mode | What it is |
 | --- | --- |
-| **Quick Demo** | A deterministic midgame reached through real engine play. You (Parallax Labs) have just rolled and face a real choice: build a Compute Cluster now, or trade a rival for the GPU you need for an AI Factory. Three AI rivals then play through the same engine. |
-| **New Game** | You vs. 3 AI companies with a Quick Start opening (two Compute Clusters + two Network Connections each, chosen for an even start). |
-| **Custom game** | 2–4 companies, any mix of humans (local pass-and-play on one device) and AI; optional manual snake-draft opening; optional board seed. All-AI games can be spectated. |
-| **Continue** | The current game auto-saves to browser storage. |
+| **New Game** | Name your AI company, meet the three rivals, and pick the rules: **Settlers of Compute** (default: Infrastructure Financing + Full-Stack Integration) or **Classic** (the original Catan-inspired rules). You play against 3 AI companies with a Quick Start opening. |
+| **Custom game** | 2–4 companies in any mix of humans and AI. Humans play local pass-and-play on one device, each with their own company name. Optional manual snake-draft opening, board seed, rules choice and legacy "Special cards (beta)". All-AI games can be spectated. |
+| **Continue** | The current game auto-saves to browser storage. Old saves load as Classic. |
+| **Quick Demo** | A deterministic midgame kept for testing and demos. It's hidden from the menus; open the site with `#demo` to see it. |
 
 ### Controls
 
@@ -53,7 +53,23 @@ It is a playful abstraction, not a simulation of any real company's products, fi
 
 Roll → collect from matching hexes (1 per cluster, 2 per factory) → trade (market 4:1, hubs 3:1 / 2:1, or offers to rivals) → build → end turn. A **7 triggers a Grid Disruption**: players over 7 cards discard half, the roller moves the outage marker (that hex stops producing) and takes a random resource from an adjacent rival. Bonuses: **Longest Network** (+2, 5+ connections) and **Priority Access** (+2, 3+ Infrastructure Priority cards). **AI Breakthrough** cards are secret +1s.
 
-Full design notes: [`docs/GAME_DESIGN.md`](docs/GAME_DESIGN.md). Project status and next steps: [`docs/HANDOFF.md`](docs/HANDOFF.md).
+### Settlers of Compute rules (default mode)
+
+- **Infrastructure Financing.** Upgrade a cluster for **1 Capital + 2 GPUs** instead of 3 Capital + 2 GPUs.
+  - The financed factory scores and produces like a cluster until it has repaid **5 units of its own output**. One unit is repaid each time its hexes produce, and the outage stalls repayment.
+  - Once repaid, it becomes a full AI Factory.
+  - You can have up to 2 financed factories at a time.
+  - **Refinance** at 1 Capital per unit left to finish one at once.
+  - *Financing buys speed; building debt-free buys certainty.*
+- **Full-Stack Integration.** Unlock this permanent status by meeting four conditions at once:
+  - run an operational AI Factory;
+  - hold 3 sites;
+  - touch 4 resource types;
+  - connect 4 Network Connections in one network.
+
+  Once unlocked, **Integrated Deployment** builds a full AI Factory straight onto an open site for 1 Power + 1 Networking + 1 Land + 3 Capital + 2 GPUs (+2 CP).
+
+Full design notes: [`docs/GAME_DESIGN.md`](docs/GAME_DESIGN.md) and [`docs/STRATEGIC_SYSTEMS.md`](docs/STRATEGIC_SYSTEMS.md). Balance evidence: [`docs/BALANCE.md`](docs/BALANCE.md). Project status and next steps: [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
 ## Run locally
 
