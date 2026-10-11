@@ -1,6 +1,7 @@
 import { COSTS, INTEGRATION_COST, RESOURCE_INFO, bundle, companyById, describeBundle, hasBundle, missingFor, pips, sumBundle } from './constants';
 import type { BuildType } from './constants';
 import { bestSetupRoad, bestSetupVertex, productionPips, totalPips, vertexValue } from './evaluation';
+import { outputMultiplier } from './financing';
 import { disruptionVictims } from './game';
 import {
   bankRate,
@@ -261,7 +262,7 @@ function chooseDisruption(state: GameState, player: number): Action {
     for (const v of tile.vertexIds) {
       const b = state.buildings[v];
       if (!b) continue;
-      const mult = b.kind === 'factory' ? 2 : 1;
+      const mult = outputMultiplier(b);
       if (b.owner === player) score -= p * mult * 3;
       else score += p * mult * (1 + 0.25 * vps[b.owner]) + (vps[b.owner] === leaderVp ? 1.5 : 0);
     }
@@ -289,7 +290,7 @@ function disruptionHurtsMe(state: GameState, player: number): boolean {
   let hurt = 0;
   for (const v of tile.vertexIds) {
     const b = state.buildings[v];
-    if (b && b.owner === player) hurt += pips(tile.number) * (b.kind === 'factory' ? 2 : 1);
+    if (b && b.owner === player) hurt += pips(tile.number) * outputMultiplier(b);
   }
   return hurt >= 3;
 }

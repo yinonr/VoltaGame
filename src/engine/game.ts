@@ -1,6 +1,7 @@
 import { barrenTileId, createBoard } from './board';
 import {
   BANK_SUPPLY_PER_RESOURCE,
+  CLASSIC_RULES,
   COMPANIES,
   COSTS,
   DEV_CARD_INFO,
@@ -15,9 +16,14 @@ import {
   describeBundle,
   hasBundle,
   pips,
+  sanitizeCompanyName,
   sumBundle,
 } from './constants';
 import { bestSetupRoad, bestSetupVertex } from './evaluation';
+import { applyMarketEvents } from './events';
+import { applyFinancedUpgrade, applyRefinance, outputMultiplier } from './financing';
+import { applyIntegratedDeployment, updateFullStack } from './fullstack';
+import { GameError, addLog, announceLongest, gainFromBank, nameOf, pay } from './mutate';
 import { Rng, deriveSeed, randomSeed } from './rng';
 import {
   bankRate,
@@ -37,19 +43,21 @@ import type {
   Action,
   DevCardType,
   GameState,
-  LogKind,
   Player,
   ProductionReport,
   Resource,
   ResourceBundle,
+  RuleOptions,
 } from './types';
 import { RESOURCES } from './types';
 
-export class GameError extends Error {}
+export { GameError, addLog };
 
 export interface SeatConfig {
   companyId: string;
   isAI: boolean;
+  /** Custom display name (sanitized; defaults to the company's name). Display-only. */
+  name?: string;
 }
 
 export interface NewGameOptions {
@@ -59,6 +67,8 @@ export interface NewGameOptions {
   quickStart?: boolean;
   /** Shuffle the Volta special cards into the Innovation deck (default false). */
   voltaCards?: boolean;
+  /** Rules variant (default: Classic, i.e. CLASSIC_RULES). Pass COMPUTE_RULES for the flagship game. */
+  rules?: Partial<RuleOptions>;
 }
 
 export const DEFAULT_SEATS: SeatConfig[] = [
@@ -67,8 +77,6 @@ export const DEFAULT_SEATS: SeatConfig[] = [
   { companyId: COMPANIES[2].id, isAI: true },
   { companyId: COMPANIES[3].id, isAI: true },
 ];
-
-const MAX_LOG = 400;
 
 // ---------------------------------------------------------------------------
 // Creation
@@ -79,7 +87,7 @@ function snakeOrder(n: number): number[] {
   return [...forward, ...forward.slice().reverse()];
 }
 
-function createBaseState(seed: number, seats: SeatConfig[], voltaCards = false): GameState {
+function createBaseState(seed: number, seats: SeatConfig[], voltaCards = false, rules: RuleOptions = CLASSIC_RULES): GameState {
   const board = createBoard(seed);
   const rng = new Rng(deriveSeed(seed, 7));
   const deck: DevCardType[] = [];
@@ -90,7 +98,7 @@ function createBaseState(seed: number, seats: SeatConfig[], voltaCards = false):
   const players: Player[] = seats.map((seat, i) => ({
     id: i,
     companyId: seat.companyId,
-    name: companyById(seat.companyId).name,
+    name: sanitizeCompanyName(seat.name, companyById(seat.companyId).name),
     isAI: seat.isAI,
     resources: bundle(),
     devCards: [],
@@ -131,6 +139,7 @@ function createBaseState(seed: number, seats: SeatConfig[], voltaCards = false):
     nextLogId: 1,
     scenario: null,
     voltaCards,
+    rules: { ...rules },
   };
 }
 
@@ -166,9 +175,10 @@ export function createGame(options: NewGameOptions = {}): GameState {
   const seed = (options.seed ?? randomSeed()) >>> 0;
   const quickStart = options.quickStart ?? true;
   const voltaCards = options.voltaCards ?? false;
+  const rules: RuleOptions = { ...CLASSIC_RULES, ...options.rules };
 
   if (!quickStart) {
-    const s = createBaseState(seed, seats, voltaCards);
+    const s = createBaseState(seed, seats, voltaCards, rules);
     s.rng = deriveSeed(seed, 99) | 0;
     addLog(s, 'system', null, 'Opening draft: each company places a Compute Cluster and a Network Connection, then again in reverse order.');
     return s;
@@ -180,7 +190,7 @@ export function createGame(options: NewGameOptions = {}): GameState {
   let bestSpread = Infinity;
   for (let i = 0; i < 8; i++) {
     const boardSeed = i === 0 ? seed : deriveSeed(seed, i);
-    const base = createBaseState(boardSeed, seats, voltaCards);
+    const base = createBaseState(boardSeed, seats, voltaCards, rules);
     base.rng = deriveSeed(boardSeed, 99) | 0;
     const drafted = autoDraft(base);
     const spread = openingSpread(drafted);
@@ -214,33 +224,8 @@ function cloneState(st: GameState): GameState {
   };
 }
 
-export function addLog(s: GameState, kind: LogKind, player: number | null, text: string): void {
-  s.log.push({ id: s.nextLogId++, turn: s.turn, player, kind, text });
-  if (s.log.length > MAX_LOG) s.log.splice(0, s.log.length - MAX_LOG);
-}
-
-function pay(s: GameState, player: number, cost: ResourceBundle): void {
-  const p = s.players[player];
-  for (const r of RESOURCES) {
-    p.resources[r] -= cost[r];
-    s.bank[r] += cost[r];
-  }
-}
-
-function gainFromBank(s: GameState, player: number, gain: ResourceBundle): void {
-  const p = s.players[player];
-  for (const r of RESOURCES) {
-    p.resources[r] += gain[r];
-    s.bank[r] -= gain[r];
-  }
-}
-
 function isBundleValid(b: ResourceBundle): boolean {
   return RESOURCES.every((r) => Number.isInteger(b[r]) && b[r] >= 0);
-}
-
-function nameOf(s: GameState, player: number): string {
-  return s.players[player].name;
 }
 
 export function getActingPlayer(s: GameState): number | null {
@@ -278,7 +263,7 @@ function produce(s: GameState, roll: number): ProductionReport {
     for (const v of tile.vertexIds) {
       const b = s.buildings[v];
       if (!b) continue;
-      owed[b.owner][tile.type] += b.kind === 'factory' ? 2 : 1;
+      owed[b.owner][tile.type] += outputMultiplier(b);
     }
   }
   const gains: ResourceBundle[] = s.players.map(() => bundle());
@@ -580,6 +565,21 @@ export function applyAction(state: GameState, action: Action): GameState {
       break;
     }
 
+    case 'BUILD_FINANCED_FACTORY': {
+      applyFinancedUpgrade(s, actor, action.vertex); // financing.ts
+      break;
+    }
+
+    case 'REFINANCE': {
+      applyRefinance(s, actor, action.vertex); // financing.ts
+      break;
+    }
+
+    case 'BUILD_INTEGRATED_FACTORY': {
+      applyIntegratedDeployment(s, actor, action.vertex); // fullstack.ts
+      break;
+    }
+
     case 'PLAY_INTEGRATION': {
       if (!legalClusterVertices(s, actor).includes(action.vertex)) {
         throw new GameError('Full-Stack Integration needs an open site on your network, 2+ steps from any building.');
@@ -655,6 +655,8 @@ export function applyAction(state: GameState, action: Action): GameState {
       s.lastProduction = null;
       addLog(s, 'turn', s.currentPlayer, `Turn ${s.turn} — ${nameOf(s, s.currentPlayer)}`);
       s.rng = rng.state;
+      applyMarketEvents(s); // events.ts — no-op unless rules.marketEvents
+      updateFullStack(s);
       checkVictory(s); // a player can only win on their own turn
       return s;
     }
@@ -667,15 +669,9 @@ export function applyAction(state: GameState, action: Action): GameState {
 
   s.rng = rng.state;
   s.turnActionCount++;
+  updateFullStack(s); // fullstack.ts — unlocks are permanent; no-op unless rules.fullStack
   checkVictory(s);
   return s;
-}
-
-function announceLongest(s: GameState, before: number | null): void {
-  const after = s.longestRoadHolder;
-  if (after === before) return;
-  if (after !== null) addLog(s, 'build', after, `${nameOf(s, after)} now has the Longest Network (+2 CP).`);
-  else if (before !== null) addLog(s, 'build', before, `${nameOf(s, before)} lost the Longest Network.`);
 }
 
 /** Convenience for tests and tools: apply a sequence of actions. */

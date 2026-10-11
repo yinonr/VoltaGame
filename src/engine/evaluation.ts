@@ -1,4 +1,5 @@
 import { bundle, pips } from './constants';
+import { outputMultiplier } from './financing';
 import { isVertexOpen, legalSetupClusterVertices } from './rules';
 import type { GameState, Resource, ResourceBundle } from './types';
 import { RESOURCES } from './types';
@@ -13,12 +14,12 @@ export const BASE_RESOURCE_WEIGHT: Record<Resource, number> = {
   gpu: 1.1,
 };
 
-/** Expected production "pips" per resource for a player (factories count double). */
+/** Expected production "pips" per resource for a player (full factories count double, financed ones single). */
 export function productionPips(state: GameState, player: number, ignoreDisruption = false): ResourceBundle {
   const out = bundle();
   state.buildings.forEach((b, v) => {
     if (!b || b.owner !== player) return;
-    const mult = b.kind === 'factory' ? 2 : 1;
+    const mult = outputMultiplier(b);
     for (const t of state.board.vertices[v].tileIds) {
       const tile = state.board.tiles[t];
       if (tile.type === 'barren') continue;

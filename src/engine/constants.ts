@@ -1,4 +1,4 @@
-import type { BuildingKind, DevCardType, PortType, Resource, ResourceBundle, TileType } from './types';
+import type { BuildingKind, DevCardType, GameState, PortType, Resource, ResourceBundle, RuleOptions, TileType } from './types';
 import { RESOURCES } from './types';
 
 export const VP_TO_WIN = 10;
@@ -68,8 +68,66 @@ export const VOLTA_CARD_COMPOSITION: Partial<Record<DevCardType, number>> = {
   integration: 2,
 };
 
-/** Full-Stack Integration: deploy an AI Factory straight onto a new site. */
+/** Expedited Deployment (legacy Volta beta card, id 'integration'): an AI Factory straight onto a new site. */
 export const INTEGRATION_COST: ResourceBundle = bundle({ land: 1, capital: 3, gpu: 2 });
+
+// ---------------------------------------------------------------------------
+// Rules variants
+// ---------------------------------------------------------------------------
+
+/** Classic Mode: the original Catan-inspired rules. Also what old saves (no `rules` field) play. */
+export const CLASSIC_RULES: RuleOptions = { financing: false, fullStack: false, marketEvents: false };
+
+/** The flagship Settlers of Compute rules: intentional Financing + earnable Full-Stack Integration. */
+export const COMPUTE_RULES: RuleOptions = { financing: true, fullStack: true, marketEvents: false };
+
+/** The rules a game is played under. Old saves without the field play Classic. */
+export function rulesOf(state: Pick<GameState, 'rules'>): RuleOptions {
+  return state.rules ?? CLASSIC_RULES;
+}
+
+// ---------------------------------------------------------------------------
+// Infrastructure Financing (intentional upgrade path, rules.financing)
+// ---------------------------------------------------------------------------
+
+/** Upfront cost of a financed AI Factory upgrade (vs. COSTS.factory = 3 Capital + 2 GPUs). */
+export const FINANCING_COST: ResourceBundle = bundle({ gpu: 2 });
+/** Committed bonus units a new financed factory owes before it becomes a full AI Factory. */
+export const FINANCING_COMMITMENT = 3;
+/** Most financed factories one company may have outstanding at once (experimental cap). */
+export const FINANCING_MAX_OUTSTANDING = 2;
+/** Hard ceiling on any one commitment, even after market events extend it. */
+export const FINANCING_MAX_COMMITMENT = 5;
+
+// ---------------------------------------------------------------------------
+// Full-Stack Integration (earned status, rules.fullStack)
+// ---------------------------------------------------------------------------
+
+/** Integrated Deployment: an AI Factory directly on an open network site (8 resources vs. 9 the long way). */
+export const INTEGRATED_DEPLOYMENT_COST: ResourceBundle = bundle({ power: 1, land: 1, capital: 3, gpu: 2 });
+
+// ---------------------------------------------------------------------------
+// Company names
+// ---------------------------------------------------------------------------
+
+export const MAX_COMPANY_NAME = 24;
+
+/**
+ * Clean a player-entered company name: strip control and markup characters, collapse
+ * whitespace, cap the length. Falls back to `fallback` when nothing usable is left.
+ * Names are display-only: they never affect the rules, the RNG or the AI.
+ */
+export function sanitizeCompanyName(raw: string | null | undefined, fallback: string): string {
+  const cleaned = (raw ?? '')
+    .normalize('NFC')
+    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, '')
+    .replace(/[<>{}\[\]\\`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const chars = Array.from(cleaned);
+  const capped = chars.length > MAX_COMPANY_NAME ? chars.slice(0, MAX_COMPANY_NAME).join('').trim() : cleaned;
+  return capped.length > 0 ? capped : fallback;
+}
 
 /** Probability "pips" for a production number (ways to roll it out of 36). */
 export function pips(n: number | null): number {
@@ -157,7 +215,9 @@ export const DEV_CARD_INFO: Record<DevCardType, { title: string; analog: string;
     short: 'Name a resource; rivals hand over all of it.',
   },
   integration: {
-    title: 'Full-Stack Integration',
+    // Legacy Volta beta card (id kept as 'integration' for save compatibility). Renamed so it is
+    // never confused with the earnable Full-Stack Integration status of the Compute rules.
+    title: 'Expedited Deployment',
     analog: 'Volta special',
     text: 'Deploy an AI Factory directly onto an open site on your network, skipping the cluster stage. Pay 1 Land + 3 Capital + 2 GPUs; power and connectivity come integrated. +2 CP at once.',
     short: 'Drop a full AI Factory on a new site for 1 Land + 3 Capital + 2 GPUs.',

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { GameState, TileType } from '../engine/types';
 import { BARREN_INFO, RESOURCE_INFO, companyById, pips } from '../engine/constants';
+import { outputMultiplier } from '../engine/financing';
 import { ResourceGlyph } from './icons';
 
 const S = 64; // pixels per unit hex radius
@@ -340,7 +341,7 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
               .map((v, i) => {
                 const bld = state.buildings[v]!;
                 const vert = board.vertices[v];
-                const n = bld.kind === 'factory' ? 2 : 1;
+                const n = outputMultiplier(bld);
                 const res = tile.type as Exclude<TileType, 'barren'>;
                 const short = report.shortages.includes(res);
                 // Float the chip just above the producing building (buildings are 2+ steps apart,

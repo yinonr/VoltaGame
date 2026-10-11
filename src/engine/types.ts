@@ -69,6 +69,7 @@ export interface DevCard {
 export interface Player {
   id: number;
   companyId: string;
+  /** Display name. Defaults to the company's name; a human may rename their company. */
   name: string;
   isAI: boolean;
   resources: ResourceBundle;
@@ -76,6 +77,8 @@ export interface Player {
   devCards: DevCard[];
   /** Infrastructure Priority cards played (largest-army analogue). */
   priorityPlayed: number;
+  /** Turn on which this company unlocked Full-Stack Integration (permanent). Absent = locked. */
+  fullStackTurn?: number;
 }
 
 export type BuildingKind = 'cluster' | 'factory';
@@ -83,6 +86,14 @@ export type BuildingKind = 'cluster' | 'factory';
 export interface Building {
   owner: number;
   kind: BuildingKind;
+  /**
+   * Infrastructure Financing: committed bonus units still owed by a financed AI Factory.
+   * Only meaningful on factories. Every reader must test `(b.financed ?? 0) > 0`; the field is
+   * ABSENT (never 0) on unfinanced factories, so old saves read as unfinanced.
+   * Buildings are shared between states (cloneState copies the array shallowly):
+   * NEVER mutate a Building in place, always write a new object.
+   */
+  financed?: number;
 }
 
 export type Phase =
@@ -119,6 +130,9 @@ export type LogKind =
   | 'card'
   | 'turn'
   | 'system'
+  | 'finance' // Infrastructure Financing: financed upgrades, deliveries, completions, refinancing
+  | 'milestone' // Full-Stack Integration unlocks
+  | 'event' // market events
   | 'win';
 
 export interface LogEntry {
@@ -143,6 +157,45 @@ export interface ProductionReport {
   /** Resources gained per player index. */
   gains: ResourceBundle[];
   shortages: Resource[];
+  /** Committed units delivered by financed factories this roll (optional: absent in old saves). */
+  deliveries?: Delivery[];
+}
+
+/** One committed unit delivered by a financed AI Factory. `left` = units still owed afterwards. */
+export interface Delivery {
+  player: number;
+  vertex: number;
+  resource: Resource;
+  left: number;
+}
+
+/**
+ * Rules variant. Absent on a GameState (old saves) means CLASSIC_RULES (everything off).
+ * Classic Mode = all false; the flagship "Settlers of Compute" rules = COMPUTE_RULES.
+ */
+export interface RuleOptions {
+  /** Intentional Infrastructure Financing: upgrade a cluster for 2 GPUs plus a production commitment. */
+  financing: boolean;
+  /** Earnable Full-Stack Integration status, which unlocks Integrated Deployment. */
+  fullStack: boolean;
+  /** Experimental market events (Credit Crunch and friends). Off by default. */
+  marketEvents: boolean;
+}
+
+export type MarketEventType = 'creditCrunch' | 'computeBoom';
+
+export interface MarketEvent {
+  type: MarketEventType;
+  /** Global turn on which it fired. */
+  turn: number;
+  /** One-line, player-facing summary. */
+  text: string;
+}
+
+export interface MarketState {
+  /** Global turn on which the next event fires (deterministic from the seed). */
+  nextEventTurn: number;
+  last: MarketEvent | null;
 }
 
 export interface GameState {
@@ -184,6 +237,10 @@ export interface GameState {
   scenario: string | null;
   /** Volta special cards shuffled into the Innovation deck (optional for older saves). */
   voltaCards?: boolean;
+  /** Rules variant (optional for older saves: absent = Classic). Read it through `rulesOf(state)`. */
+  rules?: RuleOptions;
+  /** Market events state (only when rules.marketEvents is on). */
+  market?: MarketState;
 }
 
 export type Action =
@@ -195,6 +252,12 @@ export type Action =
   | { type: 'BUILD_ROAD'; edge: number }
   | { type: 'BUILD_CLUSTER'; vertex: number }
   | { type: 'BUILD_FACTORY'; vertex: number }
+  /** Infrastructure Financing: upgrade an own cluster for FINANCING_COST plus a commitment. */
+  | { type: 'BUILD_FINANCED_FACTORY'; vertex: number }
+  /** Pay off a financed factory's remaining commitment with Capital (not a card play). */
+  | { type: 'REFINANCE'; vertex: number }
+  /** Full-Stack Integration reward: deploy an AI Factory straight onto an open network site. */
+  | { type: 'BUILD_INTEGRATED_FACTORY'; vertex: number }
   | { type: 'BUY_CARD' }
   | { type: 'PLAY_PRIORITY' }
   | { type: 'PLAY_EXPANSION' }

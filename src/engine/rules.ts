@@ -88,7 +88,8 @@ export interface Check {
 
 const OK: Check = { ok: true };
 
-function turnCheck(state: GameState, player: number): Check {
+/** Shared main-phase gate: own turn, rolled, no pending trade or sub-phase. */
+export function turnCheck(state: GameState, player: number): Check {
   if (state.phase === 'gameOver') return { ok: false, reason: 'The game is over.' };
   if (state.currentPlayer !== player) return { ok: false, reason: "It isn't your turn." };
   if (state.pendingTrade) return { ok: false, reason: 'Waiting for a trade response.' };

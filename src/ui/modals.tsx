@@ -400,7 +400,7 @@ export function WinnerModal({
           <tr>
             <th>Company</th>
             <th title="Compute Clusters">Clusters</th>
-            <th title="AI Factories (2 CP each)">Factories</th>
+            <th title="AI Factories (2 CP each; financed factories score 1 CP until their commitment is delivered)">Factories</th>
             <th>Longest Network</th>
             <th>Priority Access</th>
             <th>Breakthroughs</th>
@@ -415,7 +415,10 @@ export function WinnerModal({
                 {viewer === p.id ? ' (you)' : ''}
               </td>
               <td>{sb.clusters}</td>
-              <td>{sb.factories} ({sb.factories * 2})</td>
+              <td>
+                {sb.factories}
+                {sb.financedFactories ? ` (+${sb.financedFactories} financed)` : ''} ({sb.factories * 2 + sb.financedFactories})
+              </td>
               <td>{sb.longestNetwork ? '+2' : '—'}</td>
               <td>{sb.priorityAccess ? '+2' : '—'}</td>
               <td>{sb.breakthroughs ? `+${sb.breakthroughs}` : '—'}</td>

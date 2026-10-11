@@ -1,4 +1,5 @@
 import { LARGEST_PRIORITY_MIN, LONGEST_NETWORK_MIN } from './constants';
+import { isFinanced } from './financing';
 import type { GameState } from './types';
 
 /** Longest trail of a player's connections; rival buildings cut the network. */
@@ -62,7 +63,10 @@ export function updatePriorityAccess(state: GameState, player: number): void {
 
 export interface ScoreBreakdown {
   clusters: number;
+  /** Fully operational AI Factories (2 CP each). */
   factories: number;
+  /** Financed AI Factories still owing committed units (1 CP each until complete). */
+  financedFactories: number;
   longestNetwork: number;
   priorityAccess: number;
   breakthroughs: number;
@@ -73,19 +77,22 @@ export interface ScoreBreakdown {
 export function scoreBreakdown(state: GameState, player: number): ScoreBreakdown {
   let clusters = 0;
   let factories = 0;
+  let financedFactories = 0;
   for (const b of state.buildings) {
     if (b && b.owner === player) {
       if (b.kind === 'cluster') clusters++;
+      else if (isFinanced(b)) financedFactories++;
       else factories++;
     }
   }
   const longest = state.longestRoadHolder === player ? 2 : 0;
   const priority = state.largestArmyHolder === player ? 2 : 0;
   const breakthroughs = state.players[player].devCards.filter((c) => c.type === 'breakthrough').length;
-  const publicTotal = clusters + factories * 2 + longest + priority;
+  const publicTotal = clusters + financedFactories + factories * 2 + longest + priority;
   return {
     clusters,
     factories,
+    financedFactories,
     longestNetwork: longest,
     priorityAccess: priority,
     breakthroughs,
