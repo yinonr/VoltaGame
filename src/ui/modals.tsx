@@ -7,6 +7,7 @@ import type { Action, GameState, Resource, ResourceBundle } from '../engine/type
 import { RESOURCES } from '../engine/types';
 import { ResourceIcon } from './icons';
 import { CompanyDot } from './panels';
+import { VOLTA_BRANDING, VOLTA_SITE_URL, VoltaWordmark } from './brand';
 
 export function Modal({ title, children, onClose, wide = false, className = '' }: { title: string; children: ReactNode; onClose?: () => void; wide?: boolean; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -425,6 +426,19 @@ export function WinnerModal({
         </tbody>
       </table>
       </div>
+      {VOLTA_BRANDING && (
+        <div className="volta-close">
+          <p className="volta-close-line">The next generation of AI runs on infrastructure.</p>
+          <p className="volta-close-by">
+            Brought to you by <VoltaWordmark size={15} />
+            {VOLTA_SITE_URL && (
+              <a href={VOLTA_SITE_URL} target="_blank" rel="noopener noreferrer">
+                Visit Volta →
+              </a>
+            )}
+          </p>
+        </div>
+      )}
       <div className="modal-actions">
         <button className="btn" onClick={onTitle}>
           Title screen

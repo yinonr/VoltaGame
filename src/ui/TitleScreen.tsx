@@ -5,11 +5,13 @@ import { RESOURCES } from '../engine/types';
 import { ResourceIcon } from './icons';
 import { CompanyDot } from './panels';
 import { AboutModal, RulesModal } from './modals';
+import { VOLTA_BRANDING, VoltaWordmark } from './brand';
 
 export interface CustomOptions {
   seats: SeatConfig[];
   quickStart: boolean;
   seed?: number;
+  voltaCards?: boolean;
 }
 
 type SeatMode = 'human' | 'ai' | 'off';
@@ -33,6 +35,7 @@ export function TitleScreen({
   const [seatModes, setSeatModes] = useState<SeatMode[]>(['human', 'ai', 'ai', 'ai']);
   const [quickStart, setQuickStart] = useState(true);
   const [seedText, setSeedText] = useState('');
+  const [voltaCards, setVoltaCards] = useState(false);
 
   const active = seatModes.filter((m) => m !== 'off').length;
   const customProblem = active < 2 ? 'Pick at least 2 companies.' : null;
@@ -49,11 +52,25 @@ export function TitleScreen({
         ))}
       </div>
       <div className="title-card">
-        <p className="eyebrow">An unofficial strategy prototype</p>
+        {VOLTA_BRANDING ? (
+          <p className="spec-line" aria-hidden="true">
+            SITE MAP · 19 HEXES · 4 COMPANIES · FIRST TO 10 CP
+          </p>
+        ) : (
+          <p className="eyebrow">An unofficial strategy prototype</p>
+        )}
         <h1 className="logo">
           SETTLERS <em>of</em> COMPUTE
         </h1>
-        <p className="tagline">Build your AI empire. Before someone else builds theirs.</p>
+        <p className="tagline">The race to build the AI economy.</p>
+        {VOLTA_BRANDING && (
+          <p className="presented-by">
+            <span className="presented-rule" aria-hidden="true" />
+            <span className="presented-label">Brought to you by</span>
+            <VoltaWordmark size={22} />
+            <span className="presented-rule" aria-hidden="true" />
+          </p>
+        )}
         <p className="lede">
           Compute is no longer just for giants. Four ambitious AI companies. One emerging market. Build your infrastructure, make your deals, and become the market leader.
         </p>
@@ -125,6 +142,9 @@ export function TitleScreen({
                 <input type="checkbox" checked={quickStart} onChange={(e) => setQuickStart(e.target.checked)} /> Quick Start opening (uncheck for a manual snake draft)
               </label>
               <label>
+                <input type="checkbox" checked={voltaCards} onChange={(e) => setVoltaCards(e.target.checked)} /> Special cards (beta): add 2 × Full-Stack Integration to the Innovation deck
+              </label>
+              <label>
                 Board seed{' '}
                 <input
                   type="text"
@@ -151,6 +171,7 @@ export function TitleScreen({
                       .map((x) => ({ companyId: x.companyId, isAI: x.mode === 'ai' })),
                     quickStart,
                     seed: seedText ? Number(seedText) : undefined,
+                    voltaCards,
                   })
                 }
               >
@@ -174,7 +195,9 @@ export function TitleScreen({
         </div>
 
         <p className="disclaimer">
-          Independent, unofficial, Catan-inspired creative prototype. Not affiliated with, sponsored or endorsed by Volta or Catan rights holders. All company names are fictional.
+          {VOLTA_BRANDING
+            ? 'Concept build: Volta branding is shown for review and is not approved for public release. Catan-inspired; not affiliated with Catan rights holders. Company names in the game are fictional.'
+            : 'Independent, unofficial, Catan-inspired creative prototype. Not affiliated with, sponsored or endorsed by Volta or Catan rights holders. All company names are fictional.'}
         </p>
       </div>
       {rules && <RulesModal onClose={() => setRules(false)} />}

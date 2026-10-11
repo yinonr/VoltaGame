@@ -60,7 +60,16 @@ export const DEV_DECK_COMPOSITION: Record<DevCardType, number> = {
   grant: 2,
   consolidation: 2,
   breakthrough: 5,
+  integration: 0, // Volta special card: only shuffled in when the game enables Volta cards
 };
+
+/** Extra cards added to the deck when a game enables Volta special cards. */
+export const VOLTA_CARD_COMPOSITION: Partial<Record<DevCardType, number>> = {
+  integration: 2,
+};
+
+/** Full-Stack Integration: deploy an AI Factory straight onto a new site. */
+export const INTEGRATION_COST: ResourceBundle = bundle({ land: 1, capital: 3, gpu: 2 });
 
 /** Probability "pips" for a production number (ways to roll it out of 36). */
 export function pips(n: number | null): number {
@@ -122,7 +131,7 @@ export const BARREN_INFO = {
   blurb: 'No grid access yet. The Grid Disruption marker starts here.',
 };
 
-export const DEV_CARD_INFO: Record<DevCardType, { title: string; analog: string; text: string; short: string }> = {
+export const DEV_CARD_INFO: Record<DevCardType, { title: string; analog: string; text: string; short: string; flavor?: string }> = {
   priority: {
     title: 'Infrastructure Priority',
     analog: 'Knight',
@@ -146,6 +155,13 @@ export const DEV_CARD_INFO: Record<DevCardType, { title: string; analog: string;
     analog: 'Monopoly',
     text: 'Name a resource. Every rival gives you all of theirs.',
     short: 'Name a resource; rivals hand over all of it.',
+  },
+  integration: {
+    title: 'Full-Stack Integration',
+    analog: 'Volta special',
+    text: 'Deploy an AI Factory directly onto an open site on your network, skipping the cluster stage. Pay 1 Land + 3 Capital + 2 GPUs; power and connectivity come integrated. +2 CP at once.',
+    short: 'Drop a full AI Factory on a new site for 1 Land + 3 Capital + 2 GPUs.',
+    flavor: 'One platform. Every layer.',
   },
   breakthrough: {
     title: 'AI Breakthrough',

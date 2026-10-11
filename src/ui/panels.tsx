@@ -330,6 +330,7 @@ export function CardsPanel({ state, player, onPlay }: { state: GameState; player
                 )}
               </div>
               <p className="small muted">{info.short}</p>
+              {info.flavor && <p className="small card-flavor">“{info.flavor}”</p>}
               {g.fresh > 0 && type !== 'breakthrough' && <p className="small hint">New — playable next turn.</p>}
               {check && !check.ok && g.fresh === 0 && <p className="small why">{check.reason}</p>}
             </li>

@@ -6,7 +6,9 @@ import {
   DEV_CARD_INFO,
   DEV_DECK_COMPOSITION,
   HAND_LIMIT,
+  INTEGRATION_COST,
   RESOURCE_INFO,
+  VOLTA_CARD_COMPOSITION,
   VP_TO_WIN,
   bundle,
   companyById,
@@ -29,6 +31,7 @@ import {
   legalRoadEdges,
   piecesLeft,
 } from './rules';
+import type { PlayableCardType } from './rules';
 import { updateLongestNetwork, updatePriorityAccess, victoryPoints } from './scoring';
 import type {
   Action,
@@ -54,6 +57,8 @@ export interface NewGameOptions {
   seats?: SeatConfig[];
   /** Auto-place two clusters + connections per company (default true). */
   quickStart?: boolean;
+  /** Shuffle the Volta special cards into the Innovation deck (default false). */
+  voltaCards?: boolean;
 }
 
 export const DEFAULT_SEATS: SeatConfig[] = [
@@ -74,12 +79,13 @@ function snakeOrder(n: number): number[] {
   return [...forward, ...forward.slice().reverse()];
 }
 
-function createBaseState(seed: number, seats: SeatConfig[]): GameState {
+function createBaseState(seed: number, seats: SeatConfig[], voltaCards = false): GameState {
   const board = createBoard(seed);
   const rng = new Rng(deriveSeed(seed, 7));
   const deck: DevCardType[] = [];
   (Object.keys(DEV_DECK_COMPOSITION) as DevCardType[]).forEach((t) => {
-    for (let i = 0; i < DEV_DECK_COMPOSITION[t]; i++) deck.push(t);
+    const extra = voltaCards ? (VOLTA_CARD_COMPOSITION[t] ?? 0) : 0;
+    for (let i = 0; i < DEV_DECK_COMPOSITION[t] + extra; i++) deck.push(t);
   });
   const players: Player[] = seats.map((seat, i) => ({
     id: i,
@@ -124,6 +130,7 @@ function createBaseState(seed: number, seats: SeatConfig[]): GameState {
     log: [],
     nextLogId: 1,
     scenario: null,
+    voltaCards,
   };
 }
 
@@ -158,9 +165,10 @@ export function createGame(options: NewGameOptions = {}): GameState {
   if (seats.length < 2 || seats.length > 4) throw new GameError('Games need 2–4 companies.');
   const seed = (options.seed ?? randomSeed()) >>> 0;
   const quickStart = options.quickStart ?? true;
+  const voltaCards = options.voltaCards ?? false;
 
   if (!quickStart) {
-    const s = createBaseState(seed, seats);
+    const s = createBaseState(seed, seats, voltaCards);
     s.rng = deriveSeed(seed, 99) | 0;
     addLog(s, 'system', null, 'Opening draft: each company places a Compute Cluster and a Network Connection, then again in reverse order.');
     return s;
@@ -172,7 +180,7 @@ export function createGame(options: NewGameOptions = {}): GameState {
   let bestSpread = Infinity;
   for (let i = 0; i < 8; i++) {
     const boardSeed = i === 0 ? seed : deriveSeed(seed, i);
-    const base = createBaseState(boardSeed, seats);
+    const base = createBaseState(boardSeed, seats, voltaCards);
     base.rng = deriveSeed(boardSeed, 99) | 0;
     const drafted = autoDraft(base);
     const spread = openingSpread(drafted);
@@ -320,7 +328,7 @@ function checkVictory(s: GameState): void {
   }
 }
 
-function assertCardPlayable(s: GameState, player: number, type: 'priority' | 'expansion' | 'grant' | 'consolidation') {
+function assertCardPlayable(s: GameState, player: number, type: PlayableCardType) {
   const check = checkPlayCard(s, player, type);
   if (!check.ok) throw new GameError(check.reason);
   const p = s.players[player];
@@ -569,6 +577,20 @@ export function applyAction(state: GameState, action: Action): GameState {
         p.resources[action.resource] = 0;
       }
       addLog(s, 'card', actor, `${me.name} played ${DEV_CARD_INFO.consolidation.title} on ${RESOURCE_INFO[action.resource].label} and collected ${taken}.`);
+      break;
+    }
+
+    case 'PLAY_INTEGRATION': {
+      if (!legalClusterVertices(s, actor).includes(action.vertex)) {
+        throw new GameError('Full-Stack Integration needs an open site on your network, 2+ steps from any building.');
+      }
+      assertCardPlayable(s, actor, 'integration');
+      pay(s, actor, INTEGRATION_COST);
+      s.buildings[action.vertex] = { owner: actor, kind: 'factory' };
+      addLog(s, 'card', actor, `${me.name} played ${DEV_CARD_INFO.integration.title}: an AI Factory deployed straight onto a new site (+2 CP).`);
+      const before = s.longestRoadHolder;
+      updateLongestNetwork(s); // a new building can cut a rival's network
+      announceLongest(s, before);
       break;
     }
 

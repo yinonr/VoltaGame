@@ -2149,3 +2149,150 @@ kbd {
     padding: 28px 18px;
   }
 }
+
+/* =====================================================================
+   Staged Volta co-branding (html.brand-volta). Restrained, industrial:
+   hairline rules, spec-sheet micro-labels, corner registration marks.
+   The wordmark is a typographic placeholder for the official asset.
+   ===================================================================== */
+.volta-wordmark {
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  margin-right: -0.32em; /* optical: trailing letter-spacing */
+  color: #f8fafc;
+  line-height: 1;
+}
+.spec-line {
+  margin: 0 0 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  color: var(--muted);
+}
+.presented-by {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 4px auto 16px;
+  max-width: 520px;
+}
+.presented-label {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.presented-rule {
+  flex: 1;
+  height: 1px;
+  min-width: 24px;
+  background: linear-gradient(90deg, transparent, rgba(226, 232, 240, 0.35), transparent);
+}
+.volta-close {
+  margin-top: 16px;
+  padding: 14px 4px 2px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+.volta-close-line {
+  margin: 0 0 6px;
+  font-family: var(--display);
+  font-size: 15px;
+  color: #dbe3f0;
+}
+.volta-close-by {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.volta-close-by a {
+  color: var(--accent);
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-size: 12px;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(34, 211, 238, 0.4);
+}
+.volta-close-by a:hover {
+  border-bottom-color: var(--accent);
+}
+
+/* Infrastructure detailing, only in the branded build. */
+.brand-volta .title-card,
+.brand-volta .modal,
+.brand-volta .panel:not(.sheet-body .panel) {
+  position: relative;
+}
+.brand-volta .title-card::before,
+.brand-volta .title-card::after,
+.brand-volta .winner-modal::before,
+.brand-volta .winner-modal::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-color: rgba(226, 232, 240, 0.45);
+  border-style: solid;
+  pointer-events: none;
+}
+.brand-volta .title-card::before,
+.brand-volta .winner-modal::before {
+  top: 10px;
+  left: 10px;
+  border-width: 1px 0 0 1px;
+}
+.brand-volta .title-card::after,
+.brand-volta .winner-modal::after {
+  right: 10px;
+  bottom: 10px;
+  border-width: 0 1px 1px 0;
+}
+.brand-volta .panel-head h2,
+.brand-volta .modal-body h3 {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  font-size: 11.5px;
+}
+.brand-volta .panel-head {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.brand-volta .board-plate {
+  stroke: rgba(226, 232, 240, 0.16);
+  stroke-dasharray: 2 6;
+}
+.brand-volta .banner {
+  border-radius: 8px;
+  letter-spacing: 0.01em;
+}
+.brand-volta .eyebrow {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (max-width: 820px), (max-height: 520px) {
+  .presented-by {
+    gap: 8px;
+  }
+  .presented-label {
+    font-size: 10px;
+  }
+}
+
+.card-flavor {
+  font-style: italic;
+  color: #c4b5fd;
+}
+.card-item.card-integration {
+  border-color: rgba(34, 211, 238, 0.45);
+  background: linear-gradient(135deg, rgba(14, 116, 144, 0.28), rgba(10, 16, 32, 0.5));
+}

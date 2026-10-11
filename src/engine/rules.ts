@@ -1,4 +1,4 @@
-import { COSTS, PIECE_LIMITS, hasBundle, missingFor, describeBundle, sumBundle, BUILD_LABELS } from './constants';
+import { COSTS, INTEGRATION_COST, PIECE_LIMITS, hasBundle, missingFor, describeBundle, sumBundle, BUILD_LABELS } from './constants';
 import type { BuildType } from './constants';
 import type { GameState, Resource } from './types';
 
@@ -151,7 +151,9 @@ export function playableCards(state: GameState, player: number) {
   return p.devCards.filter((c) => c.type !== 'breakthrough' && c.boughtOnTurn < state.turn);
 }
 
-export function checkPlayCard(state: GameState, player: number, type: 'priority' | 'expansion' | 'grant' | 'consolidation'): Check {
+export type PlayableCardType = 'priority' | 'expansion' | 'grant' | 'consolidation' | 'integration';
+
+export function checkPlayCard(state: GameState, player: number, type: PlayableCardType): Check {
   if (state.phase === 'gameOver') return { ok: false, reason: 'The game is over.' };
   if (state.currentPlayer !== player) return { ok: false, reason: "It isn't your turn." };
   if (state.pendingTrade) return { ok: false, reason: 'Waiting for a trade response.' };
@@ -168,6 +170,13 @@ export function checkPlayCard(state: GameState, player: number, type: 'priority'
     return { ok: false, reason: 'No room for new connections.' };
   }
   if (type === 'grant' && sumBundle(state.bank) === 0) return { ok: false, reason: 'The market is empty.' };
+  if (type === 'integration') {
+    if (piecesLeft(state, player).factory <= 0) return { ok: false, reason: 'All 4 AI Factories are built.' };
+    if (legalClusterVertices(state, player).length === 0) return { ok: false, reason: 'No open site on your network.' };
+    if (!hasBundle(p.resources, INTEGRATION_COST)) {
+      return { ok: false, reason: `Need ${describeBundle(missingFor(p.resources, INTEGRATION_COST))} more.` };
+    }
+  }
   return OK;
 }
 

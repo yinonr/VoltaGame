@@ -1,10 +1,14 @@
 import { useState } from 'react';
+import { VOLTA_BRANDING } from './ui/brand';
 import { createDemoGame } from './engine/demo';
 import { createGame } from './engine/game';
 import type { CustomOptions } from './ui/TitleScreen';
 import { TitleScreen } from './ui/TitleScreen';
 import { GameScreen } from './ui/GameScreen';
 import { loadSavedGame, useGame } from './ui/useGame';
+
+// Staged co-branding: enables the restrained Volta design details in styles.css.
+if (VOLTA_BRANDING) document.documentElement.classList.add('brand-volta');
 
 export default function App() {
   const ctl = useGame();
@@ -26,7 +30,7 @@ export default function App() {
   };
   const startCustom = (o: CustomOptions) => {
     ctl.setPaused(false);
-    ctl.setState(createGame({ seats: o.seats, quickStart: o.quickStart, seed: o.seed }));
+    ctl.setState(createGame({ seats: o.seats, quickStart: o.quickStart, seed: o.seed, voltaCards: o.voltaCards }));
     setIntro(null);
     setScreen('game');
   };

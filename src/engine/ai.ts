@@ -314,6 +314,12 @@ function cardAction(state: GameState, player: number, goal: Goal | null): Action
   const have = state.players[player].resources;
   const missing = goal ? missingFor(have, goal.cost) : bundle();
 
+  // Full-Stack Integration: +2 CP and a doubled-output site in one move — always worth it when legal.
+  if (checkPlayCard(state, player, 'integration').ok) {
+    const { vertex } = bestClusterVertex(state, player);
+    if (vertex >= 0) return { type: 'PLAY_INTEGRATION', vertex };
+  }
+
   if (wantsPriority(state, player)) return { type: 'PLAY_PRIORITY' };
 
   if (checkPlayCard(state, player, 'consolidation').ok) {

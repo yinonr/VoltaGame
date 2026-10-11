@@ -58,7 +58,7 @@ export interface Board {
   ports: Port[];
 }
 
-export type DevCardType = 'priority' | 'expansion' | 'grant' | 'consolidation' | 'breakthrough';
+export type DevCardType = 'priority' | 'expansion' | 'grant' | 'consolidation' | 'breakthrough' | 'integration';
 
 export interface DevCard {
   id: number;
@@ -182,6 +182,8 @@ export interface GameState {
   nextLogId: number;
   /** Optional scenario label (e.g. "Quick Demo"). */
   scenario: string | null;
+  /** Volta special cards shuffled into the Innovation deck (optional for older saves). */
+  voltaCards?: boolean;
 }
 
 export type Action =
@@ -198,6 +200,7 @@ export type Action =
   | { type: 'PLAY_EXPANSION' }
   | { type: 'PLAY_GRANT'; resources: [Resource, Resource] }
   | { type: 'PLAY_CONSOLIDATION'; resource: Resource }
+  | { type: 'PLAY_INTEGRATION'; vertex: number }
   | { type: 'BANK_TRADE'; give: Resource; get: Resource }
   | { type: 'PROPOSE_TRADE'; to: number; give: ResourceBundle; get: ResourceBundle }
   | { type: 'RESPOND_TRADE'; accept: boolean; reason?: string }

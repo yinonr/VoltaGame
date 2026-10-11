@@ -45,7 +45,10 @@ interface Props {
 
 const EMPTY = new Set<number>();
 
-function instruction(state: GameState, viewer: number | null, mode: BuildType | null): string {
+/** Placement modes: a build from the menu, or a card that places a piece. */
+type Mode = BuildType | 'integration';
+
+function instruction(state: GameState, viewer: number | null, mode: Mode | null): string {
   if (state.phase === 'gameOver') return `${state.players[state.winner!].name} is the market leader.`;
   const acting = getActingPlayer(state);
   if (acting === null) return '';
@@ -76,6 +79,7 @@ function instruction(state: GameState, viewer: number | null, mode: BuildType | 
       if (mode === 'road') return 'Click a glowing edge to build a Network Connection.';
       if (mode === 'cluster') return 'Click a glowing corner to build a Compute Cluster.';
       if (mode === 'factory') return 'Click one of your clusters to upgrade it to an AI Factory.';
+      if (mode === 'integration') return 'Full-Stack Integration: click an open site on your network to deploy an AI Factory.';
       return 'Trade and build, then end your turn.';
     default:
       return '';
@@ -85,7 +89,7 @@ function instruction(state: GameState, viewer: number | null, mode: BuildType | 
 export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDemo }: Props) {
   const state = ctl.state!;
   const { dispatch, toasts, speed, setSpeed, pushToast } = ctl;
-  const [mode, setMode] = useState<BuildType | null>(null);
+  const [mode, setMode] = useState<Mode | null>(null);
   const [victimChoice, setVictimChoice] = useState<{ tile: number; victims: number[] } | null>(null);
   const [cardModal, setCardModal] = useState<'grant' | 'consolidation' | null>(null);
   const [tradeOpen, setTradeOpen] = useState(false);
@@ -108,7 +112,9 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
 
   // Reset transient UI state when it no longer applies.
   useEffect(() => {
-    if (mode && mode !== 'card' && (viewer === null || !checkBuild(state, viewer, mode).ok)) setMode(null);
+    if (!mode || mode === 'card') return;
+    const ok = viewer !== null && (mode === 'integration' ? checkPlayCard(state, viewer, 'integration').ok : checkBuild(state, viewer, mode).ok);
+    if (!ok) setMode(null);
   }, [state, mode, viewer]);
   useEffect(() => {
     if (state.phase !== 'gameOver') setWinnerDismissed(false);
@@ -133,6 +139,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
       if (mode === 'road') return { ...out, e: new Set(legalRoadEdges(state, viewer)), ghost: 'road' as Ghost };
       if (mode === 'cluster') return { ...out, v: new Set(legalClusterVertices(state, viewer)), ghost: 'cluster' as Ghost };
       if (mode === 'factory') return { ...out, v: new Set(legalFactoryVertices(state, viewer)), ghost: 'factory' as Ghost };
+      if (mode === 'integration') return { ...out, v: new Set(legalClusterVertices(state, viewer)), ghost: 'factory' as Ghost };
     }
     return out;
   }, [state, myAction, viewer, mode]);
@@ -141,6 +148,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
     if (state.phase === 'setup') dispatch({ type: 'SETUP_CLUSTER', vertex: v });
     else if (mode === 'cluster') dispatch({ type: 'BUILD_CLUSTER', vertex: v }) && setMode(null);
     else if (mode === 'factory') dispatch({ type: 'BUILD_FACTORY', vertex: v }) && setMode(null);
+    else if (mode === 'integration') dispatch({ type: 'PLAY_INTEGRATION', vertex: v }) && setMode(null);
   };
   const doEdge = (e: number) => {
     if (state.phase === 'setup') dispatch({ type: 'SETUP_ROAD', edge: e });
@@ -174,6 +182,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
     }
     if (pending.kind === 'edge') return state.phase === 'freeRoads' ? 'Place a free connection here?' : state.phase === 'setup' ? 'Place your connection here?' : 'Build a Network Connection here?';
     if (state.phase === 'setup') return 'Place your opening cluster here?';
+    if (mode === 'integration') return 'Deploy an AI Factory here with Full-Stack Integration?';
     return mode === 'factory' ? 'Upgrade this cluster to an AI Factory?' : 'Build a Compute Cluster here?';
   })();
 
@@ -195,6 +204,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
     setMode(null);
     if (t === 'priority') dispatch({ type: 'PLAY_PRIORITY' });
     else if (t === 'expansion') dispatch({ type: 'PLAY_EXPANSION' });
+    else if (t === 'integration') setMode('integration');
     else setCardModal(t);
   };
 
@@ -448,7 +458,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
               <BuildPanel
                 state={state}
                 player={viewer}
-                mode={mode}
+                mode={mode === 'integration' ? null : mode}
                 onSelect={(t) => {
                   onSelectBuild(t);
                   if (t !== 'card') setSheet(null);
@@ -597,7 +607,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
         {viewer !== null ? (
           <>
             <HandPanel state={state} player={viewer} />
-            <BuildPanel state={state} player={viewer} mode={mode} onSelect={onSelectBuild} />
+            <BuildPanel state={state} player={viewer} mode={mode === 'integration' ? null : mode} onSelect={onSelectBuild} />
             <CardsPanel state={state} player={viewer} onPlay={onPlayCard} />
           </>
         ) : (

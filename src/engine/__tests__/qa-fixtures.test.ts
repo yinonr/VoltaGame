@@ -2,7 +2,7 @@ import { it } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import { createGame, applyAction } from '../game';
 import { buildDemoGame } from '../demo';
-import { COSTS } from '../constants';
+import { COSTS, INTEGRATION_COST } from '../constants';
 import { legalClusterVertices } from '../rules';
 import { victoryPoints } from '../scoring';
 import { setHand, withNextRoll, place } from './helpers';
@@ -35,5 +35,11 @@ it.runIf(process.env.QA_GEN)('generate QA states', () => {
   }
   c = setHand(c, 0, COSTS.cluster);
   writeFileSync(OUT + '/qa-win.json', JSON.stringify(c));
+
+  // D: human holds an old Full-Stack Integration card and can afford it, with a legal site
+  let d: GameState = { ...buildDemoGame(), voltaCards: true };
+  d = setHand(d, 0, INTEGRATION_COST);
+  d = { ...d, players: d.players.map((p) => (p.id === 0 ? { ...p, devCards: [...p.devCards, { id: 777, type: 'integration' as const, boughtOnTurn: 0 }] } : p)) };
+  writeFileSync(OUT + '/qa-integration.json', JSON.stringify(d));
   console.log('C vp', victoryPoints(c, 0), 'sites', legalClusterVertices(c, 0).length);
 });
