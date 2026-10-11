@@ -8,6 +8,7 @@ import {
   DEV_DECK_COMPOSITION,
   HAND_LIMIT,
   INTEGRATION_COST,
+  MAX_COMPANY_NAME,
   RESOURCE_INFO,
   VOLTA_CARD_COMPOSITION,
   VP_TO_WIN,
@@ -97,10 +98,11 @@ function createBaseState(seed: number, seats: SeatConfig[], voltaCards = false, 
     const extra = voltaCards ? (VOLTA_CARD_COMPOSITION[t] ?? 0) : 0;
     for (let i = 0; i < DEV_DECK_COMPOSITION[t] + extra; i++) deck.push(t);
   });
+  const names = displayNames(seats);
   const players: Player[] = seats.map((seat, i) => ({
     id: i,
     companyId: seat.companyId,
-    name: sanitizeCompanyName(seat.name, companyById(seat.companyId).name),
+    name: names[i],
     isAI: seat.isAI,
     resources: bundle(),
     devCards: [],
@@ -145,6 +147,29 @@ function createBaseState(seed: number, seats: SeatConfig[], voltaCards = false, 
   };
 }
 
+/**
+ * Sanitized, unique display names. Company default names keep priority; a custom name that
+ * collides with another seat's name (case-insensitively) gets a number, so log lines and trade
+ * prompts never read "Helixa Bio took 1 resource from Helixa Bio".
+ */
+function displayNames(seats: SeatConfig[]): string[] {
+  const wanted = seats.map((seat) => {
+    const fallback = companyById(seat.companyId).name;
+    return { name: sanitizeCompanyName(seat.name, fallback), isDefault: sanitizeCompanyName(seat.name, fallback) === fallback };
+  });
+  const taken = new Set(wanted.filter((w) => w.isDefault).map((w) => w.name.toLowerCase()));
+  return wanted.map((w) => {
+    if (w.isDefault) return w.name;
+    let name = w.name;
+    for (let n = 2; taken.has(name.toLowerCase()); n++) {
+      const suffix = ` ${n}`;
+      name = Array.from(w.name).slice(0, MAX_COMPANY_NAME - suffix.length).join('').trimEnd() + suffix;
+    }
+    taken.add(name.toLowerCase());
+    return name;
+  });
+}
+
 /** Run the snake-draft opening automatically using the shared placement heuristic. */
 export function autoDraft(state: GameState): GameState {
   let s = state;
@@ -177,7 +202,12 @@ export function createGame(options: NewGameOptions = {}): GameState {
   const seed = (options.seed ?? randomSeed()) >>> 0;
   const quickStart = options.quickStart ?? true;
   const voltaCards = options.voltaCards ?? false;
-  const rules: RuleOptions = { ...CLASSIC_RULES, ...options.rules };
+  // Explicit booleans: a partial with `undefined` values must not leak into saves.
+  const rules: RuleOptions = {
+    financing: options.rules?.financing ?? CLASSIC_RULES.financing,
+    fullStack: options.rules?.fullStack ?? CLASSIC_RULES.fullStack,
+    marketEvents: options.rules?.marketEvents ?? CLASSIC_RULES.marketEvents,
+  };
 
   if (!quickStart) {
     const s = createBaseState(seed, seats, voltaCards, rules);
@@ -610,7 +640,7 @@ export function applyAction(state: GameState, action: Action): GameState {
 
     case 'PLAY_INTEGRATION': {
       if (!legalClusterVertices(s, actor).includes(action.vertex)) {
-        throw new GameError('Full-Stack Integration needs an open site on your network, 2+ steps from any building.');
+        throw new GameError('Expedited Deployment needs an open site on your network, 2+ steps from any building.');
       }
       assertCardPlayable(s, actor, 'integration');
       pay(s, actor, INTEGRATION_COST);

@@ -117,21 +117,27 @@ export const INTEGRATED_DEPLOYMENT_COST: ResourceBundle = bundle({ power: 1, net
 
 export const MAX_COMPANY_NAME = 24;
 
+/** Characters that render as nothing on their own; a name made only of these is blank. */
+const BLANK_GLYPHS = /[\u2800\u3164\uffa0\u115f\u1160]/gu;
+
 /**
- * Clean a player-entered company name: strip control and markup characters, collapse
- * whitespace, cap the length. Falls back to `fallback` when nothing usable is left.
+ * Clean a player-entered company name: strip control, format and markup characters (keeping the
+ * zero-width joiners that emoji sequences and some scripts need), collapse whitespace, cap the
+ * length. Falls back to `fallback` when nothing visible is left.
  * Names are display-only: they never affect the rules, the RNG or the AI.
  */
 export function sanitizeCompanyName(raw: string | null | undefined, fallback: string): string {
   const cleaned = (raw ?? '')
     .normalize('NFC')
-    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, '')
+    .replace(/[\p{Cc}\p{Co}]/gu, '')
+    .replace(/(?![\u200c\u200d])\p{Cf}/gu, '') // bidi overrides, zero-width space, BOM, tags, soft hyphen
     .replace(/[<>{}\[\]\\`]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   const chars = Array.from(cleaned);
-  const capped = chars.length > MAX_COMPANY_NAME ? chars.slice(0, MAX_COMPANY_NAME).join('').trim() : cleaned;
-  return capped.length > 0 ? capped : fallback;
+  const capped = (chars.length > MAX_COMPANY_NAME ? chars.slice(0, MAX_COMPANY_NAME).join('') : cleaned).replace(/[\u200c\u200d\s]+$/u, '');
+  const visible = /[\p{L}\p{N}\p{S}\p{P}]/u.test(capped.replace(BLANK_GLYPHS, ''));
+  return visible ? capped : fallback;
 }
 
 /** Probability "pips" for a production number (ways to roll it out of 36). */

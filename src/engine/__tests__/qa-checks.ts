@@ -1,0 +1,500 @@
+import { decideAIAction } from '../ai';
+import {
+  BANK_SUPPLY_PER_RESOURCE,
+  COMPUTE_RULES,
+  FINANCING_MAX_COMMITMENT,
+  FINANCING_MAX_OUTSTANDING,
+  LARGEST_PRIORITY_MIN,
+  LONGEST_NETWORK_MIN,
+  VP_TO_WIN,
+  rulesOf,
+} from '../constants';
+import { isFinanced } from '../financing';
+import { applyAction, createGame, getActingPlayer } from '../game';
+import type { NewGameOptions } from '../game';
+import { piecesLeft } from '../rules';
+import { longestNetwork, scoreBreakdown, victoryPoints } from '../scoring';
+import type { Action, GameState, Phase, ResourceBundle } from '../types';
+import { RESOURCES } from '../types';
+import { ALL_AI } from './helpers';
+
+// Shared QA machinery for invariants.test.ts, fuzz.test.ts and legacy-saves.test.ts:
+// deep freezing (so any in-place mutation in the reducer or the AI throws), a JSON-safety walk
+// (= "a save/load round trip is lossless"), whole-state and per-transition invariants, and an
+// all-AI game driver. Every check reads the rules through rulesOf() and never assumes the
+// Financing / Full-Stack / market-event state is absent, so it covers those mechanics as soon
+// as their real implementations land.
+
+// ---------------------------------------------------------------------------
+// Configurations
+// ---------------------------------------------------------------------------
+
+export interface QaConfig {
+  name: string;
+  options: NewGameOptions;
+}
+
+const AI2 = [ALL_AI[1], ALL_AI[3]];
+const AI3 = ALL_AI.slice(1);
+
+/** Rules variants × seat counts exercised by the invariant and fuzz suites. */
+export const QA_CONFIGS: QaConfig[] = [
+  { name: 'classic', options: { seats: ALL_AI } },
+  { name: 'compute', options: { seats: ALL_AI, rules: COMPUTE_RULES } },
+  { name: 'financing', options: { seats: ALL_AI, rules: { financing: true } } },
+  { name: 'fullStack', options: { seats: ALL_AI, rules: { fullStack: true } } },
+  { name: 'compute+events', options: { seats: ALL_AI, rules: { ...COMPUTE_RULES, marketEvents: true } } },
+  { name: 'volta', options: { seats: ALL_AI, voltaCards: true } },
+  { name: '2p classic', options: { seats: ALL_AI.slice(0, 2) } },
+  { name: '2p compute', options: { seats: AI2, rules: COMPUTE_RULES } },
+  { name: '3p compute+events+volta', options: { seats: AI3, rules: { ...COMPUTE_RULES, marketEvents: true }, voltaCards: true } },
+  // Manual snake draft driven by the AI: covers the setup phase, which Quick Start skips.
+  { name: '3p classic draft', options: { seats: ALL_AI.slice(0, 3), quickStart: false } },
+  { name: '4p compute draft', options: { seats: ALL_AI, rules: COMPUTE_RULES, quickStart: false } },
+];
+
+// ---------------------------------------------------------------------------
+// Freezing and JSON safety
+// ---------------------------------------------------------------------------
+
+/** Recursively freeze. Already-frozen subtrees (shared with earlier states) are skipped. */
+export function deepFreeze<T>(value: T): T {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  Object.freeze(value);
+  if (Array.isArray(value)) for (let i = 0; i < value.length; i++) deepFreeze(value[i]);
+  else for (const k of Object.keys(value)) deepFreeze((value as Record<string, unknown>)[k]);
+  return value;
+}
+
+export class InvariantError extends Error {}
+
+function fail(msg: string): never {
+  throw new InvariantError(msg);
+}
+
+// Frozen objects never change, so one successful walk is enough for each of them.
+const jsonSafe = new WeakSet<object>();
+
+/**
+ * Assert that JSON.parse(JSON.stringify(value)) reproduces `value` exactly: only finite numbers,
+ * strings, booleans, null, dense arrays and plain objects, and no `undefined` properties
+ * (JSON drops them). -0 is accepted (it round-trips to 0, which behaves identically as an index).
+ */
+export function assertJsonSafe(value: unknown, path = 'state'): void {
+  if (value === null) return;
+  switch (typeof value) {
+    case 'string':
+    case 'boolean':
+      return;
+    case 'number':
+      if (!Number.isFinite(value)) fail(`${path} is ${value}: not JSON-safe`);
+      return;
+    case 'object':
+      break;
+    default:
+      fail(`${path} is a ${typeof value}: not JSON-safe`);
+  }
+  const obj = value as object;
+  if (jsonSafe.has(obj)) return;
+  if (Array.isArray(obj)) {
+    // (Non-index properties, which JSON also drops, are checked on the vertex/edge-indexed
+    // arrays in checkState; walking keys of the 400-entry log on every step is too slow.)
+    for (let i = 0; i < obj.length; i++) {
+      if (!(i in obj)) fail(`${path}[${i}] is a hole: not JSON-safe`);
+      assertJsonSafe(obj[i], `${path}[${i}]`);
+    }
+  } else {
+    const proto = Object.getPrototypeOf(obj);
+    if (proto !== Object.prototype && proto !== null) fail(`${path} is not a plain object`);
+    for (const [k, v] of Object.entries(obj)) {
+      if (v === undefined) fail(`${path}.${k} is undefined (JSON drops it; contract fields must be absent instead)`);
+      assertJsonSafe(v, `${path}.${k}`);
+    }
+  }
+  if (Object.isFrozen(obj)) jsonSafe.add(obj);
+}
+
+/** A save/load round trip, exactly as the UI does it (localStorage holds JSON). */
+export function roundTrip(s: GameState): GameState {
+  return JSON.parse(JSON.stringify(s)) as GameState;
+}
+
+// ---------------------------------------------------------------------------
+// Whole-state invariants
+// ---------------------------------------------------------------------------
+
+const PHASES: Phase[] = ['setup', 'preRoll', 'discard', 'moveDisruption', 'main', 'freeRoads', 'gameOver'];
+
+function isCount(n: unknown): boolean {
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0;
+}
+
+function checkBundle(b: ResourceBundle, path: string): void {
+  for (const r of RESOURCES) if (!isCount(b[r])) fail(`${path}.${r} = ${b[r]}: not a non-negative integer`);
+}
+
+function isSeat(s: GameState, p: unknown): boolean {
+  return typeof p === 'number' && Number.isInteger(p) && p >= 0 && p < s.players.length;
+}
+
+/** Every invariant that must hold for any reachable state. Throws InvariantError. */
+export function checkState(s: GameState): void {
+  if (s.version !== 1) fail(`version ${s.version}`);
+  if (!PHASES.includes(s.phase)) fail(`unknown phase ${s.phase}`);
+  const n = s.players.length;
+  if (n < 2 || n > 4) fail(`${n} players`);
+  const rules = rulesOf(s);
+
+  // Resources: conservation and no negative counts.
+  checkBundle(s.bank, 'bank');
+  s.players.forEach((p, i) => {
+    if (p.id !== i) fail(`players[${i}].id = ${p.id}`);
+    checkBundle(p.resources, `players[${i}].resources`);
+    if (!isCount(p.priorityPlayed)) fail(`players[${i}].priorityPlayed = ${p.priorityPlayed}`);
+    for (const c of p.devCards) if (!(c.boughtOnTurn <= s.turn)) fail(`players[${i}] holds a card bought on future turn ${c.boughtOnTurn}`);
+  });
+  for (const r of RESOURCES) {
+    const total = s.players.reduce((t, p) => t + p.resources[r], s.bank[r]);
+    if (total !== BANK_SUPPLY_PER_RESOURCE) fail(`conservation: ${total} ${r} across hands + market (expected ${BANK_SUPPLY_PER_RESOURCE})`);
+  }
+
+  // Acting player.
+  const actor = getActingPlayer(s);
+  if (s.phase === 'gameOver') {
+    if (actor !== null) fail('getActingPlayer is not null at gameOver');
+  } else if (!isSeat(s, actor)) fail(`getActingPlayer = ${actor}`);
+  if (!isSeat(s, s.currentPlayer)) fail(`currentPlayer = ${s.currentPlayer}`);
+
+  // Board pieces.
+  if (s.buildings.length !== s.board.vertices.length) fail('buildings length != vertices');
+  if (s.roads.length !== s.board.edges.length) fail('roads length != edges');
+  // A write such as buildings[1.5] or roads[-1] adds a non-index property that JSON silently drops.
+  for (const [name, arr] of [['buildings', s.buildings], ['roads', s.roads], ['pendingDiscards', s.pendingDiscards]] as const) {
+    if (Object.keys(arr).length !== arr.length) fail(`${name} has non-index properties: ${Object.keys(arr).filter((k) => !/^\d+$/.test(k))}`);
+  }
+  const financedPerOwner = s.players.map(() => 0);
+  s.buildings.forEach((b, v) => {
+    if (b === null) return;
+    if (!isSeat(s, b.owner)) fail(`buildings[${v}].owner = ${b.owner}`);
+    if (b.kind !== 'cluster' && b.kind !== 'factory') fail(`buildings[${v}].kind = ${b.kind}`);
+    if ('financed' in b) {
+      // Contract: absent (never 0, never undefined) when unfinanced; only on factories; capped.
+      const f = b.financed;
+      if (b.kind !== 'factory') fail(`buildings[${v}] is a ${b.kind} with a financed field`);
+      if (typeof f !== 'number' || !Number.isInteger(f) || f < 1 || f > FINANCING_MAX_COMMITMENT) {
+        fail(`buildings[${v}].financed = ${f} (must be an integer 1..${FINANCING_MAX_COMMITMENT}, or absent)`);
+      }
+      if (!rules.financing) fail(`buildings[${v}] is financed but rules.financing is off`);
+      financedPerOwner[b.owner]++;
+    }
+    for (const nb of s.board.vertices[v].neighborIds) if (s.buildings[nb]) fail(`distance rule broken at ${v}/${nb}`);
+  });
+  financedPerOwner.forEach((c, p) => {
+    if (c > FINANCING_MAX_OUTSTANDING) fail(`player ${p} has ${c} financed factories (max ${FINANCING_MAX_OUTSTANDING})`);
+  });
+  s.roads.forEach((owner, e) => {
+    if (owner === null) return;
+    if (!isSeat(s, owner)) fail(`roads[${e}] = ${owner}`);
+    // Roads are only ever built next to an own building or road, and never removed.
+    const edge = s.board.edges[e];
+    const touches = [edge.a, edge.b].some(
+      (v) => s.buildings[v]?.owner === owner || s.board.vertices[v].edgeIds.some((o) => o !== e && s.roads[o] === owner),
+    );
+    if (!touches) fail(`roads[${e}] (player ${owner}) is not connected to its owner's network`);
+  });
+
+  // Scores and pieces.
+  for (let p = 0; p < n; p++) {
+    const sb = scoreBreakdown(s, p);
+    if (sb.total !== victoryPoints(s, p, true)) fail(`scoreBreakdown(${p}).total ${sb.total} != victoryPoints ${victoryPoints(s, p, true)}`);
+    if (sb.publicTotal !== victoryPoints(s, p, false)) fail(`publicTotal != victoryPoints(public) for ${p}`);
+    if (sb.publicTotal > sb.total) fail(`public score ${sb.publicTotal} > total ${sb.total} for ${p}`);
+    if (sb.financedFactories !== financedPerOwner[p]) fail(`scoreBreakdown(${p}).financedFactories = ${sb.financedFactories}, expected ${financedPerOwner[p]}`);
+    const left = piecesLeft(s, p);
+    for (const k of ['road', 'cluster', 'factory'] as const) if (left[k] < 0) fail(`piecesLeft(${p}).${k} = ${left[k]}`);
+  }
+
+  // Winner and victory timing.
+  if (s.phase === 'gameOver') {
+    if (!isSeat(s, s.winner)) fail(`gameOver without a winner (${s.winner})`);
+    const vp = victoryPoints(s, s.winner!, true);
+    if (vp < VP_TO_WIN) fail(`winner ${s.winner} has only ${vp} CP`);
+    if (s.winner !== s.currentPlayer) fail('winner is not the current player (wins happen only on your own turn)');
+  } else {
+    if (s.winner !== null) fail(`winner ${s.winner} set outside gameOver`);
+    if (s.phase !== 'setup') {
+      const vp = victoryPoints(s, s.currentPlayer, true);
+      if (vp >= VP_TO_WIN) fail(`current player ${s.currentPlayer} has ${vp} CP but the game is not over`);
+    }
+  }
+
+  // Phase bookkeeping. (A win can end the game mid-step, e.g. Priority Access from a card played
+  // before rolling, or Longest Network from a free connection, so sub-phase leftovers are allowed
+  // at gameOver.)
+  if ((s.phase === 'setup') !== (s.setup !== null)) fail(`phase ${s.phase} with setup = ${JSON.stringify(s.setup)}`);
+  if (s.pendingDiscards.length !== n) fail('pendingDiscards length');
+  for (const d of s.pendingDiscards) if (!isCount(d)) fail(`pendingDiscards = ${s.pendingDiscards}`);
+  if (!isCount(s.freeRoadsLeft)) fail(`freeRoadsLeft ${s.freeRoadsLeft}`);
+  if (s.phase !== 'gameOver') {
+    if (s.phase === 'discard' ? !s.pendingDiscards.some((d) => d > 0) : s.pendingDiscards.some((d) => d > 0)) {
+      fail(`phase ${s.phase} with pendingDiscards ${s.pendingDiscards}`);
+    }
+    if ((s.phase === 'freeRoads') !== s.freeRoadsLeft > 0) fail(`phase ${s.phase} with freeRoadsLeft ${s.freeRoadsLeft}`);
+    if (s.returnPhase !== null && s.phase !== 'discard' && s.phase !== 'moveDisruption') fail(`returnPhase ${s.returnPhase} in phase ${s.phase}`);
+  }
+  if (s.pendingTrade) {
+    const t = s.pendingTrade;
+    if (s.phase !== 'main') fail(`pending trade in phase ${s.phase}`);
+    if (t.from !== s.currentPlayer || !isSeat(s, t.to) || t.to === t.from) fail(`pending trade ${t.from} -> ${t.to}`);
+    checkBundle(t.give, 'pendingTrade.give');
+    checkBundle(t.get, 'pendingTrade.get');
+    if (!RESOURCES.every((r) => s.players[t.from].resources[r] >= t.give[r])) fail("pending trade: proposer can't cover the offer");
+  }
+  if (!isCount(s.turnActionCount) || !isCount(s.tradesProposedThisTurn)) fail('per-turn counters');
+  if (!Number.isInteger(s.disruptionTile) || !s.board.tiles[s.disruptionTile]) fail(`disruptionTile ${s.disruptionTile}`);
+  if (s.longestRoadHolder !== null && !isSeat(s, s.longestRoadHolder)) fail(`longestRoadHolder ${s.longestRoadHolder}`);
+  if (s.largestArmyHolder !== null) {
+    const h = s.largestArmyHolder;
+    if (!isSeat(s, h)) fail(`largestArmyHolder ${h}`);
+    const top = Math.max(...s.players.map((p) => p.priorityPlayed));
+    if (s.players[h].priorityPlayed < LARGEST_PRIORITY_MIN || s.players[h].priorityPlayed !== top) fail(`Priority Access held by ${h} without the most cards`);
+  }
+
+  // Full-Stack status and market state only exist under their rules.
+  s.players.forEach((p, i) => {
+    if (p.fullStackTurn === undefined) {
+      if ('fullStackTurn' in p) fail(`players[${i}].fullStackTurn is present but undefined (must be absent)`);
+      return;
+    }
+    if (!rules.fullStack) fail(`players[${i}] unlocked Full-Stack but rules.fullStack is off`);
+    if (!Number.isInteger(p.fullStackTurn) || p.fullStackTurn < 0 || p.fullStackTurn > s.turn) fail(`players[${i}].fullStackTurn = ${p.fullStackTurn}`);
+  });
+  if (s.market !== undefined) {
+    if (!rules.marketEvents) fail('market state present but rules.marketEvents is off');
+    if (!Number.isInteger(s.market.nextEventTurn)) fail(`market.nextEventTurn = ${s.market.nextEventTurn}`);
+    const last = s.market.last;
+    if (last !== null && (typeof last.type !== 'string' || typeof last.text !== 'string' || !(last.turn <= s.turn))) fail(`market.last = ${JSON.stringify(last)}`);
+  }
+  const deliveries = s.lastProduction?.deliveries;
+  if (deliveries) {
+    for (const d of deliveries) {
+      if (!isSeat(s, d.player) || !s.board.vertices[d.vertex] || !RESOURCES.includes(d.resource) || !isCount(d.left) || d.left >= FINANCING_MAX_COMMITMENT) {
+        fail(`bad delivery ${JSON.stringify(d)}`);
+      }
+    }
+  }
+
+  // Log bookkeeping.
+  if (s.log.length > 400) fail(`log has ${s.log.length} entries`);
+  for (let i = 1; i < s.log.length; i++) if (s.log[i].id <= s.log[i - 1].id) fail('log ids not increasing');
+  if (s.log.length > 0 && s.log[s.log.length - 1].id >= s.nextLogId) fail('nextLogId behind the log');
+
+  assertJsonSafe(s);
+}
+
+/** Longest Network holder is consistent with the current network lengths (holder keeps ties). */
+export function checkLongestNetwork(s: GameState): void {
+  if (s.phase === 'setup') return; // only settled when the draft completes
+  const lengths = s.players.map((p) => longestNetwork(s, p.id));
+  const max = Math.max(...lengths);
+  const h = s.longestRoadHolder;
+  if (h !== null) {
+    if (lengths[h] < LONGEST_NETWORK_MIN || lengths[h] !== max) fail(`Longest Network held by ${h} at ${lengths[h]} (lengths ${lengths})`);
+  } else if (max >= LONGEST_NETWORK_MIN && lengths.filter((l) => l === max).length === 1) {
+    fail(`nobody holds Longest Network although player ${lengths.indexOf(max)} uniquely leads with ${max}`);
+  }
+}
+
+function piecesChanged(a: GameState, b: GameState): boolean {
+  for (let i = 0; i < a.roads.length; i++) if (a.roads[i] !== b.roads[i]) return true;
+  for (let i = 0; i < a.buildings.length; i++) {
+    const x = a.buildings[i];
+    const y = b.buildings[i];
+    if (x !== y && (x?.owner !== y?.owner || x?.kind !== y?.kind)) return true;
+  }
+  return false;
+}
+
+/**
+ * Independent oracle for production on a non-7 roll (Classic shortage rule; a financed factory
+ * pays 1 like a cluster and its committed unit never reaches the hand). Skipped when market
+ * events are on, since an event may legitimately modify production.
+ */
+function expectedGains(prev: GameState, roll: number): ResourceBundle[] {
+  const owed = prev.players.map(() => ({ power: 0, networking: 0, land: 0, capital: 0, gpu: 0 }) as ResourceBundle);
+  for (const tile of prev.board.tiles) {
+    if (tile.number !== roll || tile.id === prev.disruptionTile || tile.type === 'barren') continue;
+    for (const v of tile.vertexIds) {
+      const b = prev.buildings[v];
+      if (b) owed[b.owner][tile.type] += b.kind === 'factory' && !isFinanced(b) ? 2 : 1;
+    }
+  }
+  const gains = prev.players.map(() => ({ power: 0, networking: 0, land: 0, capital: 0, gpu: 0 }) as ResourceBundle);
+  for (const r of RESOURCES) {
+    const total = owed.reduce((t, o) => t + o[r], 0);
+    if (total === 0) continue;
+    if (total <= prev.bank[r]) owed.forEach((o, i) => (gains[i][r] = o[r]));
+    else {
+      const claimants = owed.map((o, i) => (o[r] > 0 ? i : -1)).filter((i) => i >= 0);
+      if (claimants.length === 1) gains[claimants[0]][r] = prev.bank[r];
+    }
+  }
+  return gains;
+}
+
+/** Invariants relating a state, the action applied to it and the result. Throws InvariantError. */
+export function checkTransition(prev: GameState, action: Action, next: GameState): void {
+  if (next === prev) fail('applyAction returned its input');
+  if (next.seed !== prev.seed) fail('seed changed');
+  if (next.players.length !== prev.players.length) fail('player count changed');
+  const actor = getActingPlayer(prev)!;
+
+  // The RNG is consumed only by dice and steals (financing, full-stack and events must not use it).
+  if (next.rng !== prev.rng && action.type !== 'ROLL' && action.type !== 'MOVE_DISRUPTION') fail(`${action.type} consumed the game RNG`);
+  // Card supply: every purchase moves exactly one card from the deck and bumps nextCardId.
+  if (next.devDeck.length + next.nextCardId !== prev.devDeck.length + prev.nextCardId) fail('Innovation Card supply not conserved');
+  // Turn order.
+  if (action.type === 'END_TURN') {
+    if (next.turn !== prev.turn + 1 || next.currentPlayer !== (prev.currentPlayer + 1) % prev.players.length) fail('END_TURN did not advance the turn');
+  } else if (next.turn !== prev.turn && !(action.type === 'SETUP_ROAD' && prev.turn === 0 && next.turn === 1)) {
+    fail(`${action.type} changed the turn counter`);
+  }
+
+  // Pieces are never removed or downgraded, and never change hands.
+  prev.buildings.forEach((b, v) => {
+    if (!b) return;
+    const after = next.buildings[v];
+    if (!after || after.owner !== b.owner) fail(`building at ${v} removed or changed owner after ${action.type}`);
+    if (b.kind === 'factory' && after.kind !== 'factory') fail(`factory at ${v} downgraded after ${action.type}`);
+  });
+  prev.roads.forEach((o, e) => {
+    if (o !== null && next.roads[e] !== o) fail(`road ${e} removed or changed owner after ${action.type}`);
+  });
+
+  // Full-Stack Integration is permanent and its unlock turn never changes.
+  prev.players.forEach((p, i) => {
+    if (p.fullStackTurn !== undefined && next.players[i].fullStackTurn !== p.fullStackTurn) fail(`players[${i}].fullStackTurn changed`);
+  });
+
+  // Only the actor's hand changes on a build or a market trade.
+  if (['BUILD_ROAD', 'BUILD_CLUSTER', 'BUILD_FACTORY', 'BUILD_FINANCED_FACTORY', 'REFINANCE', 'BUILD_INTEGRATED_FACTORY', 'BUY_CARD', 'BANK_TRADE'].includes(action.type)) {
+    next.players.forEach((p, i) => {
+      if (i !== actor && RESOURCES.some((r) => p.resources[r] !== prev.players[i].resources[r])) fail(`${action.type} changed player ${i}'s hand`);
+    });
+  }
+
+  // Dice: production matches an independent oracle; deliveries are consistent with the buildings.
+  if (action.type === 'ROLL' && next.lastRoll) {
+    const { d1, d2, total } = next.lastRoll;
+    if (!(d1 >= 1 && d1 <= 6 && d2 >= 1 && d2 <= 6 && total === d1 + d2)) fail(`dice ${JSON.stringify(next.lastRoll)}`);
+    if (total !== 7) {
+      const report = next.lastProduction;
+      if (!report || report.roll !== total) fail('no production report for the roll');
+      next.players.forEach((p, i) => {
+        for (const r of RESOURCES) {
+          if (p.resources[r] - prev.players[i].resources[r] !== report.gains[i][r]) fail(`player ${i} ${r}: hand change != reported gain`);
+        }
+      });
+      if (!rulesOf(prev).marketEvents) {
+        const want = expectedGains(prev, total);
+        want.forEach((g, i) => {
+          for (const r of RESOURCES) if (g[r] !== report.gains[i][r]) fail(`roll ${total}: player ${i} gained ${report.gains[i][r]} ${r}, oracle says ${g[r]}`);
+        });
+      }
+      for (const d of report.deliveries ?? []) {
+        if (report.shortages.includes(d.resource)) fail(`delivery of ${d.resource} during a shortage`);
+        const before = prev.buildings[d.vertex];
+        if (!before || before.owner !== d.player || !isFinanced(before)) fail(`delivery from a vertex that was not a financed factory: ${JSON.stringify(d)}`);
+        const after = next.buildings[d.vertex]!;
+        const lastForVertex = [...report.deliveries!].reverse().find((x) => x.vertex === d.vertex)!;
+        if ((after.financed ?? 0) !== lastForVertex.left) fail(`financed at ${d.vertex} = ${after.financed}, last delivery says ${lastForVertex.left} left`);
+      }
+    }
+  }
+  // Disruption steal: exactly one resource moves from the victim to the actor.
+  if (action.type === 'MOVE_DISRUPTION' && action.victim !== null && action.victim !== undefined) {
+    const sum = (b: ResourceBundle) => RESOURCES.reduce((t, r) => t + b[r], 0);
+    const v = action.victim;
+    if (sum(prev.players[v].resources) - sum(next.players[v].resources) !== 1) fail('steal did not take exactly one resource');
+    if (sum(next.players[actor].resources) - sum(prev.players[actor].resources) !== 1) fail('steal did not give exactly one resource');
+  }
+
+  if (piecesChanged(prev, next)) checkLongestNetwork(next);
+}
+
+// ---------------------------------------------------------------------------
+// Driving all-AI games
+// ---------------------------------------------------------------------------
+
+export interface PlayOptions {
+  maxSteps?: number;
+  /** Literal save/load/replay check every `roundTripEvery` steps (0 = never)... */
+  roundTripEvery?: number;
+  /** ...at steps congruent to this offset (vary it per game to cover every residue). */
+  roundTripOffset?: number;
+  /** Called with each frozen state before the AI acts on it. */
+  onState?: (s: GameState, step: number) => void;
+}
+
+export interface PlayResult {
+  final: GameState;
+  steps: number;
+  actions: Action[];
+}
+
+/**
+ * Play a game to the end with the computer heuristic in every seat. Every state is deep-frozen
+ * before it is used, so an in-place mutation anywhere in the reducer or the AI throws; every
+ * state and transition is checked. Throws InvariantError (with context) on any violation.
+ */
+export function playChecked(start: GameState, label: string, opts: PlayOptions = {}): PlayResult {
+  const maxSteps = opts.maxSteps ?? 4000;
+  const every = opts.roundTripEvery ?? 0;
+  let s = deepFreeze(start);
+  checkState(s);
+  const actions: Action[] = [];
+  let step = 0;
+  while (s.phase !== 'gameOver') {
+    if (step >= maxSteps) fail(`${label}: no winner after ${maxSteps} steps (turn ${s.turn})`);
+    opts.onState?.(s, step);
+    const actor = getActingPlayer(s)!;
+    const action = decideAIAction(s, actor);
+    let next: GameState;
+    try {
+      next = deepFreeze(applyAction(s, action));
+      checkState(next);
+      checkTransition(s, action, next);
+        if (every > 0 && step % every === (opts.roundTripOffset ?? 0) % every) {
+        // Save, reload, replay: the reloaded state is identical and the same action on it gives
+        // the same result. (assertJsonSafe already proves every state round-trips losslessly.)
+        const saved = JSON.stringify(s);
+        const reloaded = JSON.parse(saved) as GameState;
+        if (JSON.stringify(reloaded) !== saved) fail('JSON round trip changed the state');
+        if (JSON.stringify(applyAction(reloaded, action)) !== JSON.stringify(next)) fail('the same action on the reloaded state gave a different result');
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? `${e.constructor.name}: ${e.message}` : String(e);
+      throw new InvariantError(`${label} step ${step} (turn ${s.turn}, phase ${s.phase}, actor ${actor}) ${JSON.stringify(action)} -> ${msg}`);
+    }
+    actions.push(action);
+    s = next;
+    step++;
+  }
+  opts.onState?.(s, step);
+  return { final: s, steps: step, actions };
+}
+
+export function newGame(cfg: QaConfig, seed: number): GameState {
+  return createGame({ ...cfg.options, seed });
+}
+
+/** Short stable hash (FNV-1a, 32-bit) for golden fingerprints. */
+export function fnv1a(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
