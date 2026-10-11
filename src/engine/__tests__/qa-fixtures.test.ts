@@ -51,5 +51,16 @@ it.runIf(process.env.QA_GEN)('generate QA states', () => {
   buildings[own[0]] = { owner: 0, kind: 'factory', financed: 2 };
   e = setHand({ ...e, buildings }, 0, { capital: 3, gpu: 2, power: 1 });
   writeFileSync(OUT + '/qa-financing.json', JSON.stringify(e));
+
+  // F: Compute rules, human one Refinance away from winning (9 CP), Full-Stack already unlocked.
+  let f = createGame({ seed: 777, rules: COMPUTE_RULES });
+  f = applyAction(withNextRoll(f, 8), { type: 'ROLL' });
+  const mine = f.buildings.map((b, v) => (b?.owner === 0 ? v : -1)).filter((v) => v >= 0);
+  const fb = f.buildings.slice();
+  fb[mine[0]] = { owner: 0, kind: 'factory', financed: 1 };
+  const cards = Array.from({ length: 7 }, (_, i) => ({ id: 900 + i, type: 'breakthrough' as const, boughtOnTurn: 0 }));
+  f = { ...f, buildings: fb, longestRoadHolder: null, players: f.players.map((p) => (p.id === 0 ? { ...p, devCards: cards, fullStackTurn: 1 } : p)) };
+  f = setHand(f, 0, { capital: 1 });
+  writeFileSync(OUT + '/qa-win-compute.json', JSON.stringify(f));
   console.log('C vp', victoryPoints(c, 0), 'sites', legalClusterVertices(c, 0).length);
 });

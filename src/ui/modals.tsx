@@ -22,6 +22,7 @@ import { RESOURCES } from '../engine/types';
 import { SHOW_QUICK_DEMO } from './flags';
 import { ResourceIcon } from './icons';
 import { CompanyDot } from './panels';
+import { useCountUp } from './feedback';
 import { PUBLIC_DISCLAIMER, VOLTA_BRANDING, VOLTA_SITE_URL, VoltaWordmark } from './brand';
 import { choiceOf, profileOf } from './companies';
 
@@ -374,6 +375,22 @@ export function ConsolidationModal({ onConfirm, onCancel }: { onConfirm: (r: Res
 // End of game
 // ---------------------------------------------------------------------------
 
+/** What a company actually achieved, read from the final state only (no invented labels). */
+function accomplishments(state: GameState, player: number): string[] {
+  const sb = scoreBreakdown(state, player);
+  const out: string[] = [];
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  if (sb.factories) out.push(plural(sb.factories, 'AI Factory', 'AI Factories'));
+  if (sb.financedFactories) out.push(`${sb.financedFactories} still financed`);
+  if (sb.clusters) out.push(plural(sb.clusters, 'Compute Cluster', 'Compute Clusters'));
+  if (state.longestRoadHolder === player) out.push('Longest Network');
+  if (state.largestArmyHolder === player) out.push('Priority Access');
+  const unlocked = state.players[player].fullStackTurn;
+  if (unlocked !== undefined) out.push(`Full-Stack Integration · round ${Math.max(1, Math.ceil(unlocked / state.players.length))}`);
+  if (sb.breakthroughs) out.push(plural(sb.breakthroughs, 'AI Breakthrough revealed', 'AI Breakthroughs revealed'));
+  return out;
+}
+
 export function WinnerModal({
   state,
   viewer,
@@ -397,17 +414,36 @@ export function WinnerModal({
     .map((p) => ({ p, sb: scoreBreakdown(state, p.id) }))
     .sort((x, y) => y.sb.total - x.sb.total);
   const headline = youWon ? 'You built the AI empire.' : humans === 1 && viewer !== null ? `${winner.name} scaled first.` : `${winner.name} wins.`;
+  const cp = useCountUp(standings[0].sb.total);
+  const rounds = Math.ceil(state.turn / state.players.length);
+  const inRounds = `${rounds} round${rounds === 1 ? '' : 's'}`;
+  const feats = accomplishments(state, winner.id);
   return (
     <Modal title="Market leader" onClose={onClose} wide className="winner-modal">
       <div className="winner-hero" style={{ ['--co' as string]: c.color }}>
         <div className="winner-glow" />
+        <div className="winner-burst" aria-hidden="true">
+          {Array.from({ length: 12 }, (_, i) => (
+            <i key={i} style={{ ['--a' as string]: `${i * 30}deg` }} />
+          ))}
+        </div>
         <CompanyDot companyId={winner.companyId} size={22} />
         <h1>{headline}</h1>
+        <div className="winner-cp" aria-label={`${standings[0].sb.total} Compute Points`}>
+          <b>{cp}</b> CP
+        </div>
         <p className="muted">
           {youWon
-            ? `Frontier ambition, startup-sized balance sheet — and you still scaled first. ${standings[0].sb.total} Compute Points in ${Math.ceil(state.turn / state.players.length)} rounds.`
-            : `${winner.name} (${c.sector}) reached ${standings[0].sb.total} Compute Points in ${Math.ceil(state.turn / state.players.length)} rounds. The market is still young — run it back.`}
+            ? `Frontier ambition, startup-sized balance sheet — and you still scaled first. ${standings[0].sb.total} Compute Points in ${inRounds}.`
+            : `${winner.name} (${c.sector}) reached ${standings[0].sb.total} Compute Points in ${inRounds}. The market is still young — run it back.`}
         </p>
+        {feats.length > 0 && (
+          <ul className="accomplishments" aria-label={`${winner.name}'s accomplishments`}>
+            {feats.map((f) => (
+              <li key={f}>{f}</li>
+            ))}
+          </ul>
+        )}
       </div>
       <div className="standings-wrap">
       <table className="standings">

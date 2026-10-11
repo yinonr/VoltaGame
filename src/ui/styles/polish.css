@@ -349,3 +349,67 @@
   .tile-lit-fill { fill-opacity: 0.18; }
   .token-halo, .build-ring, .road-pulse, .plate-seven { display: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   Victory: a burst in the winner's color, a CP count-up, real accomplishments.
+   --------------------------------------------------------------------------- */
+.winner-hero {
+  position: relative;
+}
+.winner-burst {
+  position: absolute;
+  left: 50%;
+  top: 34px;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.winner-burst i {
+  position: absolute;
+  left: -2px;
+  top: -2px;
+  width: 4px;
+  height: 46px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--co), transparent);
+  transform-origin: 2px 2px;
+  transform: rotate(var(--a)) translateY(18px) scaleY(0);
+  opacity: 0;
+  animation: winnerRay 1.4s cubic-bezier(0.2, 0.9, 0.3, 1) 0.15s 1 forwards;
+}
+@keyframes winnerRay {
+  0% { opacity: 0; transform: rotate(var(--a)) translateY(10px) scaleY(0.2); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(var(--a)) translateY(64px) scaleY(1); }
+}
+.winner-cp {
+  font-family: var(--display);
+  font-size: 15px;
+  color: var(--muted);
+  margin: -4px 0 2px;
+}
+.winner-cp b {
+  font-size: 40px;
+  color: var(--co);
+  text-shadow: 0 0 24px color-mix(in srgb, var(--co) 55%, transparent);
+  margin-right: 4px;
+}
+.accomplishments {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.accomplishments li {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  border: 1px solid color-mix(in srgb, var(--co) 55%, transparent);
+  background: color-mix(in srgb, var(--co) 12%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .winner-burst { display: none; }
+}
