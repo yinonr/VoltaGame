@@ -76,10 +76,15 @@ export const INTEGRATION_COST: ResourceBundle = bundle({ land: 1, capital: 3, gp
 // ---------------------------------------------------------------------------
 
 /** Classic Mode: the original Catan-inspired rules. Also what old saves (no `rules` field) play. */
-export const CLASSIC_RULES: RuleOptions = { financing: false, fullStack: false, marketEvents: false };
+export const CLASSIC_RULES: RuleOptions = { financing: false, fullStack: false, marketEvents: false, gridStability: false };
 
 /** The flagship Settlers of Compute rules: intentional Financing + earnable Full-Stack Integration. */
-export const COMPUTE_RULES: RuleOptions = { financing: true, fullStack: true, marketEvents: false };
+export const COMPUTE_RULES: RuleOptions = { financing: true, fullStack: true, marketEvents: false, gridStability: true };
+
+/** Grid Stability: rolls protected from a new natural disruption after one happens (7s included). */
+export const GRID_STABILITY_ROLLS = 6;
+/** Grid Stability: rolls an outage keeps its hex offline (the roll that caused it does not count). */
+export const GRID_OUTAGE_ROLLS = 4;
 
 /** The rules a game is played under. Old saves without the field play Classic. */
 export function rulesOf(state: Pick<GameState, 'rules'>): RuleOptions {

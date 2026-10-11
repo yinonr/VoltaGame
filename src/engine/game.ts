@@ -18,6 +18,7 @@ import {
   hasBundle,
   pips,
   resourceLabel,
+  rulesOf,
   sanitizeCompanyName,
   sumBundle,
 } from './constants';
@@ -25,6 +26,7 @@ import { bestSetupRoad, bestSetupVertex } from './evaluation';
 import { applyMarketEvents } from './events';
 import { applyFinancedUpgrade, applyRefinance, isFinanced, outputMultiplier } from './financing';
 import { applyIntegratedDeployment, updateFullStack } from './fullstack';
+import { advanceGrid, gridOf, startDisruption } from './grid';
 import { GameError, addLog, announceLongest, gainFromBank, nameOf, pay } from './mutate';
 import { Rng, deriveSeed, randomSeed } from './rng';
 import {
@@ -207,6 +209,7 @@ export function createGame(options: NewGameOptions = {}): GameState {
     financing: options.rules?.financing ?? CLASSIC_RULES.financing,
     fullStack: options.rules?.fullStack ?? CLASSIC_RULES.fullStack,
     marketEvents: options.rules?.marketEvents ?? CLASSIC_RULES.marketEvents,
+    gridStability: options.rules?.gridStability ?? CLASSIC_RULES.gridStability,
   };
 
   if (!quickStart) {
@@ -436,7 +439,15 @@ export function applyAction(state: GameState, action: Action): GameState {
       const total = d1 + d2;
       s.lastRoll = { d1, d2, total };
       addLog(s, 'roll', actor, `${me.name} rolled ${total} (${d1}+${d2}).`);
-      if (total === 7) {
+      const grid = rulesOf(s).gridStability ? gridOf(s) : null;
+      if (total === 7 && grid && grid.stableRolls > 0) {
+        // Grid Stability: a 7 while the grid is stabilizing produces nothing and disrupts nothing.
+        s.lastRoll = { d1, d2, total, stabilized: true };
+        s.lastProduction = null;
+        const left = grid.stableRolls - 1;
+        addLog(s, 'disruption', actor, `The grid is stabilizing: no disruption from this 7 (${left} protected roll${left === 1 ? '' : 's'} left).`);
+        s.phase = 'main';
+      } else if (total === 7) {
         s.lastProduction = null;
         s.pendingDiscards = s.players.map((p) => {
           const n = sumBundle(p.resources);
@@ -474,6 +485,7 @@ export function applyAction(state: GameState, action: Action): GameState {
         }
         s.phase = 'main';
       }
+      if (grid) advanceGrid(s, grid); // every roll counts down both timers, after it resolves
       break;
     }
 
@@ -496,6 +508,7 @@ export function applyAction(state: GameState, action: Action): GameState {
       if (!tile) throw new GameError('Unknown hex.');
       if (action.tile === s.disruptionTile) throw new GameError('Move the disruption to a different hex.');
       s.disruptionTile = action.tile;
+      if (rulesOf(s).gridStability) startDisruption(s); // new outage countdown + stabilization
       const victims = disruptionVictims(s, action.tile, actor);
       const label = tile.type === 'barren' ? 'the Dead Zone' : `a ${RESOURCE_INFO[tile.type].label} hex${tile.number ? ` (${tile.number})` : ''}`;
       if (victims.length > 0) {

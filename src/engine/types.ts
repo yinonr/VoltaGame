@@ -147,6 +147,20 @@ export interface DiceRoll {
   d1: number;
   d2: number;
   total: number;
+  /** Grid Stability: a 7 rolled while the grid was stabilizing, so it caused no disruption. */
+  stabilized?: boolean;
+}
+
+/**
+ * Grid Stability timers (rules.gridStability only). Counted in player dice rolls, 7s included.
+ * The outage itself is still `GameState.disruptionTile`; "no outage" = the marker rests on the
+ * Dead Zone. Absent in Classic games and in saves made before Grid Stability.
+ */
+export interface GridState {
+  /** Protected rolls left: while > 0 a natural 7 causes no discard, theft or outage move. */
+  stableRolls: number;
+  /** Rolls left before the current outage expires (0 = no timed outage). */
+  outageRolls: number;
 }
 
 export interface ProductionReport {
@@ -180,6 +194,11 @@ export interface RuleOptions {
   fullStack: boolean;
   /** Experimental market events (Credit Crunch and friends). Off by default. */
   marketEvents: boolean;
+  /**
+   * Grid Stability: after a disruption the next 6 rolls are protected and an outage lasts 4 rolls.
+   * Absent in saves made before it existed, which keep the persistent-outage rules they started with.
+   */
+  gridStability?: boolean;
 }
 
 export type MarketEventType = 'creditCrunch' | 'computeBoom';
@@ -241,6 +260,8 @@ export interface GameState {
   rules?: RuleOptions;
   /** Market events state (only when rules.marketEvents is on). */
   market?: MarketState;
+  /** Grid Stability timers (only when rules.gridStability is on; see grid.ts). */
+  grid?: GridState;
 }
 
 export type Action =

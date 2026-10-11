@@ -58,7 +58,7 @@ describe('Session 2 contracts (adversarial review)', () => {
     const again = createGame({ seed: 3, seats: ALL_AI, rules: COMPUTE_RULES });
     expect(again.rules).not.toBe(compute.rules);
 
-    expect(createGame({ seed: 3, seats: ALL_AI, rules: { financing: true } }).rules).toEqual({ financing: true, fullStack: false, marketEvents: false });
+    expect(createGame({ seed: 3, seats: ALL_AI, rules: { financing: true } }).rules).toEqual({ financing: true, fullStack: false, marketEvents: false, gridStability: false });
     expect(createGame({ seed: 3, seats: ALL_AI, rules: {} }).rules).toEqual(CLASSIC_RULES);
     // Rules never touch the dice or the opening: the same seed builds the same board and draft.
     expect(compute.buildings).toEqual(classic.buildings);
