@@ -503,12 +503,14 @@ function tradeTowards(state: GameState, player: number, goal: Goal): Action | nu
         .map((p) => ({ id: p.id, prod: productionPips(state, p.id, true)[want] }))
         .filter((c) => c.prod > 0)
         .sort((a, b) => b.prod - a.prod || a.id - b.id);
-      if (candidates.length > 0) {
+      // Humans answer offers in a modal, so they are approached sparingly (AI-to-AI choice unchanged).
+      const to = offerPartner(state, player, candidates);
+      if (to !== null) {
         const give = bundle();
         give[giveR] = surplus[giveR] >= 3 && state.players[player].resources[giveR] >= 3 ? 2 : 1;
         const get = bundle();
         get[want] = 1;
-        return { type: 'PROPOSE_TRADE', to: candidates[0].id, give, get };
+        return { type: 'PROPOSE_TRADE', to, give, get };
       }
     }
   }
@@ -602,4 +604,30 @@ export function decideAIAction(state: GameState, player: number): Action {
     default:
       return { type: 'END_TURN' };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Offer pacing (interruption fatigue)
+// ---------------------------------------------------------------------------
+
+/** An AI may approach a human with an offer on one of every this-many of its rounds. */
+export const HUMAN_OFFER_EVERY_ROUNDS = 3;
+
+/**
+ * Who an AI sends its one direct offer of the turn to, from rivals ranked best partner first.
+ * Every offer to a human opens a modal, so humans are approached sparingly: only on this AI's
+ * offer rounds (staggered by seat so the AIs take turns) and only when the human strictly out-
+ * produces every AI partner for the wanted resource. Otherwise the AI asks its best AI partner,
+ * or makes no offer. Stateless and deterministic. Whenever the top-ranked rival is an AI (always,
+ * in all-AI games) the choice is exactly the old one, so AI-to-AI play is unchanged.
+ */
+function offerPartner(state: GameState, player: number, ranked: { id: number; prod: number }[]): number | null {
+  const best = ranked[0];
+  if (!best) return null;
+  if (state.players[best.id].isAI) return best.id;
+  const bestAI = ranked.find((c) => state.players[c.id].isAI) ?? null;
+  const round = Math.floor((state.turn - 1) / state.players.length);
+  const offerRound = (round + player) % HUMAN_OFFER_EVERY_ROUNDS === 0;
+  if (offerRound && (bestAI === null || best.prod > bestAI.prod)) return best.id;
+  return bestAI ? bestAI.id : null;
 }
