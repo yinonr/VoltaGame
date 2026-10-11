@@ -1,1 +1,151 @@
 /* mechanics.css — owned by the mechanics work stream. Loaded after styles.css. */
+
+/* ---------------------------------------------------------------------------
+   Infrastructure Financing + Full-Stack Integration (Compute rules)
+   --------------------------------------------------------------------------- */
+
+/* Board: a financed factory wears a dashed amber ring and a badge with the units it still owes. */
+.financed-ring {
+  fill: none;
+  stroke: #fbbf24;
+  stroke-width: 2.2;
+  stroke-dasharray: 5 4;
+  opacity: 0.9;
+}
+.financed-ring.stalled {
+  stroke: #f87171;
+  animation: financed-stall 1.4s ease-in-out infinite;
+}
+.financed-badge circle {
+  fill: #1a1405;
+  stroke: #fbbf24;
+  stroke-width: 1.6;
+}
+.financed-badge text {
+  fill: #fde68a;
+  font: 700 10px var(--mono, ui-monospace, monospace);
+}
+.financed-badge.stalled circle {
+  fill: #2a0b0e;
+  stroke: #f87171;
+}
+.financed-badge.stalled text {
+  fill: #fecaca;
+}
+.payout-repaid {
+  fill: #fde68a;
+  font: 600 8.5px var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.02em;
+}
+@keyframes financed-stall {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .financed-ring.stalled { animation: none; }
+}
+
+/* Build menu: the financed and integrated factory paths. */
+.build-row.build-financing .build-btn {
+  border-style: dashed;
+}
+.build-row.build-financing:not(.disabled) .build-btn {
+  border-color: rgba(251, 191, 36, 0.45);
+}
+.build-row.build-integrated:not(.disabled) .build-btn {
+  border-color: rgba(167, 139, 250, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.18);
+}
+
+/* Financing panel: commitments with Refinance. */
+.commitments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.commitment {
+  border: 1px dashed rgba(251, 191, 36, 0.45);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: grid;
+  gap: 4px;
+}
+.commitment.stalled {
+  border-color: rgba(248, 113, 113, 0.6);
+  background: rgba(248, 113, 113, 0.06);
+}
+.commitment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.commitment-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.commitment-left i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.commitment-left i.owed {
+  background: #fbbf24;
+}
+.commitment-left i.paid {
+  background: transparent;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+.commitment-left b {
+  margin-left: 4px;
+  font-size: 12px;
+}
+.commitment-hexes .blocked {
+  color: #f87171;
+  text-decoration: line-through;
+}
+.refinance-btn {
+  justify-self: start;
+}
+
+/* Full-Stack Integration progress. */
+.milestones {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.milestones li {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: baseline;
+  gap: 6px;
+  opacity: 0.8;
+}
+.milestones li.done {
+  opacity: 1;
+}
+.milestones .tick {
+  color: #64748b;
+  font-weight: 700;
+}
+.milestones li.done .tick {
+  color: #4ade80;
+}
+.fullstack.unlocked {
+  border-color: rgba(167, 139, 250, 0.55);
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.2), 0 0 24px rgba(167, 139, 250, 0.12);
+}
+.fullstack-badge {
+  background: rgba(167, 139, 250, 0.18);
+  color: #ddd6fe;
+}
+.fullstack-reward {
+  margin: 0;
+  color: #c4b5fd;
+}

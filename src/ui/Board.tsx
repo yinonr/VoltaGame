@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { GameState, TileType } from '../engine/types';
 import { BARREN_INFO, RESOURCE_INFO, companyById, pips } from '../engine/constants';
-import { outputMultiplier } from '../engine/financing';
+import { isFinanced, outputMultiplier } from '../engine/financing';
 import { ResourceGlyph } from './icons';
 
 const S = 64; // pixels per unit hex radius
@@ -268,13 +268,25 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
         const vx = board.vertices[v].x * S;
         const vy = board.vertices[v].y * S;
         const co = playerColor(bld.owner);
+        const financed = isFinanced(bld);
+        const stalled = financed && board.vertices[v].tileIds.includes(state.disruptionTile);
         return (
           <g key={`b-${v}-${bld.kind}`}>
             <circle cx={vx} cy={vy} r={14} className="fresh-ring" style={{ stroke: co.color }} />
+            {financed && <circle cx={vx} cy={vy} r={21} className={`financed-ring${stalled ? ' stalled' : ''}`} />}
             {bld.kind === 'cluster' ? (
               <ClusterShape x={vx} y={vy} color={co.color} stroke={co.stroke} />
             ) : (
               <FactoryShape x={vx} y={vy} color={co.color} stroke={co.stroke} />
+            )}
+            {financed && (
+              <g className={`financed-badge${stalled ? ' stalled' : ''}`} transform={`translate(${vx + 16},${vy + 12})`}>
+                <title>{`Financed AI Factory (${state.players[bld.owner].name}): ${bld.financed} committed unit${bld.financed === 1 ? '' : 's'} left to repay${stalled ? '. Stalled: under the outage.' : '. Scores 1 CP and produces like a cluster until repaid.'}`}</title>
+                <circle r={8.5} />
+                <text y={3.6} textAnchor="middle">
+                  {bld.financed}
+                </text>
+              </g>
             )}
           </g>
         );
@@ -341,7 +353,9 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
               .map((v, i) => {
                 const bld = state.buildings[v]!;
                 const vert = board.vertices[v];
-                const n = outputMultiplier(bld);
+                // A financed factory pays 1, even on the roll that completes its commitment.
+                const delivered = (report.deliveries ?? []).some((d) => d.vertex === v);
+                const n = delivered ? 1 : outputMultiplier(bld);
                 const res = tile.type as Exclude<TileType, 'barren'>;
                 const short = report.shortages.includes(res);
                 // Float the chip just above the producing building (buildings are 2+ steps apart,
@@ -354,6 +368,11 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
                     <text x={-6} y={4} textAnchor="middle" className="payout-text" fill={RESOURCE_INFO[res].color}>
                       {short ? '✕' : `+${n}`}
                     </text>
+                    {delivered && !short && (
+                      <text x={0} y={21} textAnchor="middle" className="payout-repaid">
+                        +1 repaid
+                      </text>
+                    )}
                     <g transform="translate(3,-7) scale(0.55)">
                       <ResourceGlyph type={res} color={RESOURCE_INFO[res].color} />
                     </g>

@@ -1,6 +1,20 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { COMPANIES, DEV_CARD_INFO, RESOURCE_INFO, bundle, companyById, describeBundle, hasBundle, sumBundle } from '../engine/constants';
+import {
+  COMPANIES,
+  COSTS,
+  DEV_CARD_INFO,
+  FINANCING_COMMITMENT,
+  FINANCING_COST,
+  FINANCING_MAX_OUTSTANDING,
+  INTEGRATED_DEPLOYMENT_COST,
+  RESOURCE_INFO,
+  bundle,
+  companyById,
+  describeBundle,
+  hasBundle,
+  sumBundle,
+} from '../engine/constants';
 import { bankRate, checkBankTrade, checkTradePhase } from '../engine/rules';
 import { scoreBreakdown } from '../engine/scoring';
 import type { Action, GameState, Resource, ResourceBundle } from '../engine/types';
@@ -517,6 +531,21 @@ export function RulesModal({ onClose }: { onClose: () => void }) {
           </li>
           <li>
             <b>AI Breakthrough</b> cards are secret +1 CP each.
+          </li>
+        </ul>
+        <h3>Settlers of Compute rules</h3>
+        <p className="muted small">On in the default "Settlers of Compute" mode; off in Classic.</p>
+        <ul>
+          <li>
+            <b>Infrastructure Financing</b>: upgrade a cluster to an AI Factory for {describeBundle(FINANCING_COST)} instead of {describeBundle(COSTS.factory)}. The
+            financed factory scores and produces like a cluster until it has repaid {FINANCING_COMMITMENT} units of its own output (1 each time its hexes produce;
+            the outage stalls it). Then it is a full AI Factory: +1 CP and double output. Up to {FINANCING_MAX_OUTSTANDING} at a time. On your turn you can{' '}
+            <b>refinance</b>: pay 1 Capital per unit left to finish it at once. Financing buys speed; building debt-free buys certainty.
+          </li>
+          <li>
+            <b>Full-Stack Integration</b>: run an operational (fully repaid) AI Factory, hold three sites, touch four resource types and connect four
+            Network Connections in one network to unlock it for good. Then <b>Integrated Deployment</b> builds a full AI Factory straight onto an open
+            site on your network for {describeBundle(INTEGRATED_DEPLOYMENT_COST)} (+2 CP), skipping the cluster stage.
           </li>
         </ul>
         <h3>Shortcuts</h3>

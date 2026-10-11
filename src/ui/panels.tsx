@@ -1,11 +1,27 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type { BuildType } from '../engine/constants';
-import { BUILD_LABELS, COSTS, DEV_CARD_INFO, RESOURCE_INFO, VP_TO_WIN, companyById, sumBundle } from '../engine/constants';
+import {
+  BUILD_LABELS,
+  COSTS,
+  DEV_CARD_INFO,
+  FINANCING_COMMITMENT,
+  FINANCING_COST,
+  FINANCING_MAX_OUTSTANDING,
+  INTEGRATED_DEPLOYMENT_COST,
+  RESOURCE_INFO,
+  VP_TO_WIN,
+  companyById,
+  rulesOf,
+  sumBundle,
+} from '../engine/constants';
+import { checkFinancedUpgrade, financedVertices } from '../engine/financing';
+import { checkIntegratedDeployment } from '../engine/fullstack';
 import { getActingPlayer } from '../engine/game';
 import { checkBuild, checkPlayCard, piecesLeft } from '../engine/rules';
+import type { Check } from '../engine/rules';
 import { longestNetwork, scoreBreakdown } from '../engine/scoring';
-import type { DevCardType, GameState, LogEntry } from '../engine/types';
+import type { DevCardType, GameState, LogEntry, ResourceBundle } from '../engine/types';
 import { RESOURCES } from '../engine/types';
 import { ClusterShape, FactoryShape } from './Board';
 import { DieFace, ResourceChip, ResourceIcon } from './icons';
@@ -199,12 +215,27 @@ export function HandPanel({ state, player }: { state: GameState; player: number 
 
 const BUILD_ORDER: BuildType[] = ['road', 'cluster', 'factory', 'card'];
 
-function BuildGlyph({ type, color, stroke }: { type: BuildType; color: string; stroke: string }) {
+/** What the Build menu can start: a plain build, or one of the Compute-rules factory paths. */
+export type BuildChoice = BuildType | 'financing' | 'integrated';
+
+function BuildGlyph({ type, color, stroke }: { type: BuildChoice; color: string; stroke: string }) {
   return (
     <svg width="34" height="34" viewBox="-20 -20 40 40" aria-hidden="true">
       {type === 'road' && <line x1={-13} y1={9} x2={13} y2={-9} stroke={color} strokeWidth={7} strokeLinecap="round" style={{ filter: `drop-shadow(0 0 0 ${stroke})` }} />}
       {type === 'cluster' && <ClusterShape x={0} y={0} color={color} stroke={stroke} />}
       {type === 'factory' && <FactoryShape x={0} y={2} color={color} stroke={stroke} scale={0.9} />}
+      {type === 'financing' && (
+        <g>
+          <circle r={18} fill="none" stroke="#fbbf24" strokeWidth={2} strokeDasharray="4 3" />
+          <FactoryShape x={0} y={2} color={color} stroke={stroke} scale={0.78} />
+        </g>
+      )}
+      {type === 'integrated' && (
+        <g>
+          <FactoryShape x={-1} y={3} color={color} stroke={stroke} scale={0.8} />
+          <path d="M12 -18 L7 -8 H12 L9 0 L17 -11 H12 Z" fill="#fde68a" stroke="#0b1020" strokeWidth={1} />
+        </g>
+      )}
       {type === 'card' && (
         <g>
           <rect x={-10} y={-14} width={20} height={28} rx={3} fill="#1e1b4b" stroke="#a78bfa" strokeWidth={2} />
@@ -222,6 +253,54 @@ const BUILD_VALUE: Record<BuildType, string> = {
   card: 'Draw a secret Innovation Card',
 };
 
+interface BuildRow {
+  key: BuildChoice;
+  label: string;
+  left: string;
+  value: string;
+  cost: ResourceBundle;
+  check: Check;
+}
+
+/** Build menu rows. Under the Compute rules an upgrade is an explicit choice: standard or financed. */
+function buildRows(state: GameState, player: number): BuildRow[] {
+  const rules = rulesOf(state);
+  const left = piecesLeft(state, player);
+  const rows: BuildRow[] = [];
+  for (const t of BUILD_ORDER) {
+    const standard = t === 'factory' && rules.financing;
+    rows.push({
+      key: t,
+      label: standard ? 'AI Factory · standard' : BUILD_LABELS[t],
+      left: t === 'card' ? `${state.devDeck.length} in deck` : `${left[t]} left`,
+      value: standard ? '+1 CP and double output now. No strings attached.' : BUILD_VALUE[t],
+      cost: COSTS[t],
+      check: checkBuild(state, player, t),
+    });
+    if (t === 'factory' && rules.financing) {
+      rows.push({
+        key: 'financing',
+        label: 'AI Factory · financed',
+        left: `${FINANCING_MAX_OUTSTANDING - financedVertices(state, player).length} of ${FINANCING_MAX_OUTSTANDING} open`,
+        value: `Upgrade now; it repays ${FINANCING_COMMITMENT} units of its own output, then +1 CP and double output.`,
+        cost: FINANCING_COST,
+        check: checkFinancedUpgrade(state, player),
+      });
+    }
+    if (t === 'factory' && rules.fullStack) {
+      rows.push({
+        key: 'integrated',
+        label: 'Integrated Deployment',
+        left: `${left.factory} left`,
+        value: '+2 CP: a full AI Factory straight onto an open site.',
+        cost: INTEGRATED_DEPLOYMENT_COST,
+        check: checkIntegratedDeployment(state, player),
+      });
+    }
+  }
+  return rows;
+}
+
 export function BuildPanel({
   state,
   player,
@@ -230,47 +309,44 @@ export function BuildPanel({
 }: {
   state: GameState;
   player: number;
-  mode: BuildType | null;
-  onSelect: (t: BuildType) => void;
+  mode: BuildChoice | null;
+  onSelect: (t: BuildChoice) => void;
 }) {
   const p = state.players[player];
   const company = companyById(p.companyId);
-  const left = piecesLeft(state, player);
   return (
     <section className="panel build" aria-label="Build">
       <header className="panel-head">
         <h2>Build</h2>
         <span className="muted small">Click, then pick a glowing spot</span>
       </header>
-      {BUILD_ORDER.map((t) => {
-        const check = checkBuild(state, player, t);
-        const active = mode === t;
-        const piecesInfo = t === 'road' ? left.road : t === 'cluster' ? left.cluster : t === 'factory' ? left.factory : state.devDeck.length;
+      {buildRows(state, player).map(({ key, label, left, value, cost, check }) => {
+        const active = mode === key;
         return (
-          <div key={t} className={`build-row${active ? ' active' : ''}${check.ok ? '' : ' disabled'}`}>
+          <div key={key} className={`build-row build-${key}${active ? ' active' : ''}${check.ok ? '' : ' disabled'}`}>
             <button
               className="build-btn"
-              onClick={() => onSelect(t)}
+              onClick={() => onSelect(key)}
               disabled={!check.ok && !active}
               aria-pressed={active}
-              title={check.ok ? `Build ${BUILD_LABELS[t]} — ${BUILD_VALUE[t]}` : check.reason}
+              title={check.ok ? `${label}: ${value}` : check.reason}
             >
-              <BuildGlyph type={t} color={company.color} stroke={company.stroke} />
+              <BuildGlyph type={key} color={company.color} stroke={company.stroke} />
               <span className="build-text">
                 <strong>
-                  {BUILD_LABELS[t]} <span className="left-count">{t === 'card' ? `${piecesInfo} in deck` : `${piecesInfo} left`}</span>
+                  {label} <span className="left-count">{left}</span>
                 </strong>
                 {active ? (
                   <span className="small hint">Pick a glowing spot · Esc to cancel</span>
                 ) : check.ok ? (
-                  <span className="small muted">{BUILD_VALUE[t]}</span>
+                  <span className="small muted">{value}</span>
                 ) : (
                   <span className="small why">{check.reason}</span>
                 )}
               </span>
               <span className="cost">
-                {RESOURCES.filter((r) => COSTS[t][r] > 0).map((r) => (
-                  <ResourceChip key={r} type={r} count={COSTS[t][r]} dim={p.resources[r] < COSTS[t][r]} title={`${COSTS[t][r]} ${RESOURCE_INFO[r].label} (you have ${p.resources[r]})`} />
+                {RESOURCES.filter((r) => cost[r] > 0).map((r) => (
+                  <ResourceChip key={r} type={r} count={cost[r]} dim={p.resources[r] < cost[r]} title={`${cost[r]} ${RESOURCE_INFO[r].label} (you have ${p.resources[r]})`} />
                 ))}
               </span>
             </button>

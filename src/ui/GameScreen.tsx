@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { BuildType } from '../engine/constants';
-import { DEV_CARD_INFO, HAND_LIMIT, RESOURCE_INFO, companyById, describeBundle, sumBundle } from '../engine/constants';
+import { DEV_CARD_INFO, FINANCING_COMMITMENT, HAND_LIMIT, RESOURCE_INFO, companyById, describeBundle, sumBundle } from '../engine/constants';
+import { checkFinancedUpgrade, legalFinancingVertices } from '../engine/financing';
+import { checkIntegratedDeployment, legalIntegratedVertices } from '../engine/fullstack';
 import { disruptionVictims, getActingPlayer } from '../engine/game';
 import {
   checkBuild,
@@ -28,6 +29,8 @@ import {
   WinnerModal,
 } from './modals';
 import { BuildPanel, CardsPanel, CompanyDot, DiceDisplay, EventLog, FlashCount, HandPanel, Scoreboard } from './panels';
+import type { BuildChoice } from './panels';
+import { FinancingPanel, FullStackPanel, sitePips } from './strategy';
 import { BottomSheet, COMPACT_QUERY, useMediaQuery, ZOOM_LEVELS, ZoomableBoard } from './mobile';
 import { ResourceIcon } from './icons';
 import { scoreBreakdown } from '../engine/scoring';
@@ -46,8 +49,11 @@ interface Props {
 
 const EMPTY = new Set<number>();
 
-/** Placement modes: a build from the menu, or a card that places a piece. */
-type Mode = BuildType | 'integration';
+/** Placement modes: a build from the menu (incl. financed / integrated factories), or a card that places a piece. */
+type Mode = BuildChoice | 'integration';
+
+/** A financed factory repays from its own output; below this many pips the UI warns it will be slow. */
+const WEAK_FINANCING_SITE = 6;
 
 function instruction(state: GameState, viewer: number | null, mode: Mode | null): string {
   if (state.phase === 'gameOver') return `${state.players[state.winner!].name} is the market leader.`;
@@ -80,7 +86,9 @@ function instruction(state: GameState, viewer: number | null, mode: Mode | null)
       if (mode === 'road') return 'Click a glowing edge to build a Network Connection.';
       if (mode === 'cluster') return 'Click a glowing corner to build a Compute Cluster.';
       if (mode === 'factory') return 'Click one of your clusters to upgrade it to an AI Factory.';
-      if (mode === 'integration') return 'Full-Stack Integration: click an open site on your network to deploy an AI Factory.';
+      if (mode === 'financing') return `Infrastructure Financing: click one of your clusters. It repays ${FINANCING_COMMITMENT} units of its own output, so busy sites repay fastest.`;
+      if (mode === 'integrated') return 'Integrated Deployment: click an open site on your network to deploy a full AI Factory.';
+      if (mode === 'integration') return 'Expedited Deployment: click an open site on your network to deploy an AI Factory.';
       return 'Trade and build, then end your turn.';
     default:
       return '';
@@ -114,7 +122,15 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
   // Reset transient UI state when it no longer applies.
   useEffect(() => {
     if (!mode || mode === 'card') return;
-    const ok = viewer !== null && (mode === 'integration' ? checkPlayCard(state, viewer, 'integration').ok : checkBuild(state, viewer, mode).ok);
+    const check = (m: Mode, p: number) =>
+      m === 'integration'
+        ? checkPlayCard(state, p, 'integration')
+        : m === 'financing'
+          ? checkFinancedUpgrade(state, p)
+          : m === 'integrated'
+            ? checkIntegratedDeployment(state, p)
+            : checkBuild(state, p, m);
+    const ok = viewer !== null && check(mode, viewer).ok;
     if (!ok) setMode(null);
   }, [state, mode, viewer]);
   useEffect(() => {
@@ -141,6 +157,8 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
       if (mode === 'cluster') return { ...out, v: new Set(legalClusterVertices(state, viewer)), ghost: 'cluster' as Ghost };
       if (mode === 'factory') return { ...out, v: new Set(legalFactoryVertices(state, viewer)), ghost: 'factory' as Ghost };
       if (mode === 'integration') return { ...out, v: new Set(legalClusterVertices(state, viewer)), ghost: 'factory' as Ghost };
+      if (mode === 'financing') return { ...out, v: new Set(legalFinancingVertices(state, viewer)), ghost: 'factory' as Ghost };
+      if (mode === 'integrated') return { ...out, v: new Set(legalIntegratedVertices(state, viewer)), ghost: 'factory' as Ghost };
     }
     return out;
   }, [state, myAction, viewer, mode]);
@@ -150,6 +168,8 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
     else if (mode === 'cluster') dispatch({ type: 'BUILD_CLUSTER', vertex: v }) && setMode(null);
     else if (mode === 'factory') dispatch({ type: 'BUILD_FACTORY', vertex: v }) && setMode(null);
     else if (mode === 'integration') dispatch({ type: 'PLAY_INTEGRATION', vertex: v }) && setMode(null);
+    else if (mode === 'financing') dispatch({ type: 'BUILD_FINANCED_FACTORY', vertex: v }) && setMode(null);
+    else if (mode === 'integrated') dispatch({ type: 'BUILD_INTEGRATED_FACTORY', vertex: v }) && setMode(null);
   };
   const doEdge = (e: number) => {
     if (state.phase === 'setup') dispatch({ type: 'SETUP_ROAD', edge: e });
@@ -183,11 +203,16 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
     }
     if (pending.kind === 'edge') return state.phase === 'freeRoads' ? 'Place a free connection here?' : state.phase === 'setup' ? 'Place your connection here?' : 'Build a Network Connection here?';
     if (state.phase === 'setup') return 'Place your opening cluster here?';
-    if (mode === 'integration') return 'Deploy an AI Factory here with Full-Stack Integration?';
+    if (mode === 'integration') return 'Deploy an AI Factory here with Expedited Deployment?';
+    if (mode === 'integrated') return 'Deploy a full AI Factory here with Integrated Deployment?';
+    if (mode === 'financing') {
+      const n = sitePips(state, pending.id);
+      return `Finance an AI Factory here? It repays ${FINANCING_COMMITMENT} units of this site's output.${n < WEAK_FINANCING_SITE ? ` Careful: only ${n} pips of production, so repayment will be slow.` : ''}`;
+    }
     return mode === 'factory' ? 'Upgrade this cluster to an AI Factory?' : 'Build a Compute Cluster here?';
   })();
 
-  const onSelectBuild = (t: BuildType) => {
+  const onSelectBuild = (t: BuildChoice) => {
     if (viewer === null) return;
     if (t === 'card') {
       const before = state.players[viewer].devCards.length;
@@ -208,6 +233,8 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
     else if (t === 'integration') setMode('integration');
     else setCardModal(t);
   };
+
+  const refinance = (vertex: number) => dispatch({ type: 'REFINANCE', vertex });
 
   const roll = useCallback(() => dispatch({ type: 'ROLL' }), [dispatch]);
   const endTurn = useCallback(() => {
@@ -466,6 +493,12 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
                 }}
               />
             )}
+            {sheet === 'build' && viewer !== null && (
+              <>
+                <FinancingPanel state={state} player={viewer} onRefinance={refinance} />
+                <FullStackPanel state={state} player={viewer} />
+              </>
+            )}
             {sheet === 'cards' && viewer !== null && (
               <CardsPanel
                 state={state}
@@ -611,6 +644,8 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
           <>
             <HandPanel state={state} player={viewer} />
             <BuildPanel state={state} player={viewer} mode={mode === 'integration' ? null : mode} onSelect={onSelectBuild} />
+            <FinancingPanel state={state} player={viewer} onRefinance={refinance} />
+            <FullStackPanel state={state} player={viewer} />
             <CardsPanel state={state} player={viewer} onPlay={onPlayCard} />
           </>
         ) : (

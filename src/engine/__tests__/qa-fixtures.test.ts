@@ -2,7 +2,7 @@ import { it } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import { createGame, applyAction } from '../game';
 import { buildDemoGame } from '../demo';
-import { COSTS, INTEGRATION_COST } from '../constants';
+import { COMPUTE_RULES, COSTS, INTEGRATION_COST } from '../constants';
 import { legalClusterVertices } from '../rules';
 import { victoryPoints } from '../scoring';
 import { setHand, withNextRoll, place } from './helpers';
@@ -41,5 +41,15 @@ it.runIf(process.env.QA_GEN)('generate QA states', () => {
   d = setHand(d, 0, INTEGRATION_COST);
   d = { ...d, players: d.players.map((p) => (p.id === 0 ? { ...p, devCards: [...p.devCards, { id: 777, type: 'integration' as const, boughtOnTurn: 0 }] } : p)) };
   writeFileSync(OUT + '/qa-integration.json', JSON.stringify(d));
+
+  // E: Compute rules, human main phase: one financed factory owing 2 units, one plain cluster,
+  // and a hand that can finance the cluster (1 Capital + 2 GPUs) and then refinance (2 Capital).
+  let e = createGame({ seed: 777, rules: COMPUTE_RULES });
+  e = applyAction(withNextRoll(e, 8), { type: 'ROLL' });
+  const own = e.buildings.map((b, v) => (b?.owner === 0 ? v : -1)).filter((v) => v >= 0);
+  const buildings = e.buildings.slice();
+  buildings[own[0]] = { owner: 0, kind: 'factory', financed: 2 };
+  e = setHand({ ...e, buildings }, 0, { capital: 3, gpu: 2, power: 1 });
+  writeFileSync(OUT + '/qa-financing.json', JSON.stringify(e));
   console.log('C vp', victoryPoints(c, 0), 'sites', legalClusterVertices(c, 0).length);
 });
