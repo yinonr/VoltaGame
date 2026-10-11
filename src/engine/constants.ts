@@ -103,8 +103,9 @@ export const FINANCING_MAX_COMMITMENT = 5;
 // Full-Stack Integration (earned status, rules.fullStack)
 // ---------------------------------------------------------------------------
 
-/** Integrated Deployment: an AI Factory directly on an open network site (8 resources vs. 9 the long way). */
-export const INTEGRATED_DEPLOYMENT_COST: ResourceBundle = bundle({ power: 1, land: 1, capital: 3, gpu: 2 });
+/** Integrated Deployment: an AI Factory directly on an open network site. 8 resources (1 Power + 1 Networking +
+ *  1 Land + 3 Capital + 2 GPUs) in one action vs. 9 resources and two actions for a cluster plus an upgrade. */
+export const INTEGRATED_DEPLOYMENT_COST: ResourceBundle = bundle({ power: 1, networking: 1, land: 1, capital: 3, gpu: 2 });
 
 // ---------------------------------------------------------------------------
 // Company names

@@ -40,7 +40,7 @@ _Lead-owned. Written before the parallel work streams started (2026-10-11). Each
 | `FINANCING_COMMITMENT` | 3 units |
 | `FINANCING_MAX_OUTSTANDING` | 2 financed factories per company at once |
 | `FINANCING_MAX_COMMITMENT` | 5 units (ceiling after market-event extensions) |
-| `INTEGRATED_DEPLOYMENT_COST` | 1 Power + 1 Land + 3 Capital + 2 GPUs (8 resources vs. 9 via cluster + upgrade) |
+| `INTEGRATED_DEPLOYMENT_COST` | 1 Power + 1 Networking + 1 Land + 3 Capital + 2 GPUs = 8 resources (vs. 9 via cluster + upgrade) |
 | `MAX_COMPANY_NAME` | 24 characters |
 
 ## Module map
