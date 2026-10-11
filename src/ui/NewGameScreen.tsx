@@ -21,11 +21,12 @@ export function TitleBackdrop() {
   );
 }
 
-const RULES_OPTIONS: { id: RulesChoice; title: string; tag?: string; lines: [string, string][] }[] = [
+const RULES_OPTIONS: { id: RulesChoice; title: string; tag?: string; blurb: string; lines: [string, string][] }[] = [
   {
     id: 'compute',
     title: 'Settlers of Compute',
     tag: 'Recommended',
+    blurb: 'Financing, Full-Stack Integration and Grid Stability.',
     lines: [
       ['Infrastructure Financing', `upgrade now for ${describeBundle(FINANCING_COST)}, repay from production.`],
       ['Full-Stack Integration', 'build across the stack to deploy AI Factories directly.'],
@@ -35,6 +36,7 @@ const RULES_OPTIONS: { id: RulesChoice; title: string; tag?: string; lines: [str
   {
     id: 'classic',
     title: 'Classic',
+    blurb: 'The original rules: roll, collect, trade and build.',
     lines: [
       ['Original rules', 'roll, collect, trade and build.'],
       ['', 'No Financing, no Full-Stack Integration.'],
@@ -53,6 +55,8 @@ export function RulesPicker({ value, onChange, name }: { value: RulesChoice; onC
             <strong>{o.title}</strong>
             {o.tag && <span className="rules-tag">{o.tag}</span>}
           </span>
+          {/* Phones show the one-line blurb so both options fit above the Start button. */}
+          <span className="rules-blurb small">{o.blurb}</span>
           {o.lines.map(([k, v]) => (
             <span key={k + v} className="rules-line small">
               {k && <b>{k}: </b>}
@@ -180,6 +184,13 @@ export function NewGameScreen({
           )}
         </div>
 
+        <section className="setup-section" aria-labelledby="rules-h">
+          <h2 id="rules-h" className="setup-h">
+            Rules
+          </h2>
+          <RulesPicker value={rules} onChange={setRules} name="new-game-rules" />
+        </section>
+
         <section className="setup-section" aria-labelledby="rivals-h">
           <h2 id="rivals-h" className="setup-h">
             Your rivals <span className="muted">· computer-controlled</span>
@@ -196,13 +207,6 @@ export function NewGameScreen({
               </div>
             ))}
           </div>
-        </section>
-
-        <section className="setup-section" aria-labelledby="rules-h">
-          <h2 id="rules-h" className="setup-h">
-            Rules
-          </h2>
-          <RulesPicker value={rules} onChange={setRules} name="new-game-rules" />
         </section>
 
         <div className="setup-actions">

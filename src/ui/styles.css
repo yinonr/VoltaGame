@@ -2093,6 +2093,16 @@ kbd {
   .offer {
     gap: 6px;
   }
+  /* Results: the actions stay pinned to the bottom of the dialog while the standings scroll. */
+  .winner-modal .modal-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin: 12px -14px -14px;
+    padding: 10px 14px 14px;
+    background: #0b1226;
+    border-top: 1px solid var(--border);
+  }
   .standings-wrap {
     overflow-x: auto;
   }

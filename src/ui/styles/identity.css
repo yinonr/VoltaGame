@@ -256,6 +256,10 @@
 .rules-line {
   color: var(--muted);
 }
+.rules-blurb {
+  display: none;
+  color: var(--muted);
+}
 .rules-line b {
   color: #dbe3f0;
   font-weight: 600;
@@ -454,6 +458,8 @@
   min-width: 0;
 }
 .m-chip.me {
+  /* Your own (often longer, custom) name gets the widest chip; rivals show short names. */
+  flex-grow: 1.6;
   border-color: color-mix(in srgb, var(--co) 60%, transparent);
   background: color-mix(in srgb, var(--co) 15%, rgba(10, 16, 32, 0.75));
 }
@@ -578,9 +584,19 @@
     font-size: 17px;
     min-height: 46px;
   }
-  .rival-cards,
-  .rules-pick {
+  .rival-cards {
     grid-template-columns: minmax(0, 1fr);
+  }
+  /* Both rule sets side by side with a one-line blurb, so Classic is visible without scrolling. */
+  .rules-option {
+    padding: 9px 10px;
+  }
+  .rules-option .rules-line {
+    display: none;
+  }
+  .rules-option .rules-blurb {
+    display: block;
+    line-height: 1.3;
   }
   .rival-card {
     padding: 8px 10px;

@@ -470,7 +470,8 @@ export function WinnerModal({
               <td>{sb.clusters}</td>
               <td>
                 {sb.factories}
-                {sb.financedFactories ? ` (+${sb.financedFactories} financed)` : ''} ({sb.factories * 2 + sb.financedFactories})
+                {sb.financedFactories ? ` + ${sb.financedFactories} financed` : ''}
+                <span className="muted"> · {sb.factories * 2 + sb.financedFactories} CP</span>
               </td>
               <td>{sb.longestNetwork ? '+2' : '—'}</td>
               <td>{sb.priorityAccess ? '+2' : '—'}</td>
