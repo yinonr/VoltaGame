@@ -584,7 +584,7 @@ export function RulesModal({ onClose }: { onClose: () => void }) {
           <li>
             <b>Grid Stability</b>: after a Grid Disruption the grid stabilizes for {GRID_STABILITY_ROLLS} rolls, so a 7 in that window causes no discards,
             no theft and no outage move (it still produces nothing). An outage keeps its hex offline for the next {GRID_OUTAGE_ROLLS} rolls, then it comes
-            back online. Infrastructure Priority cards still move the outage at any time. Every roll counts, 7s included.
+            back online. Infrastructure Priority cards still move the outage at any time and restart the 6 calm rolls when they knock a hex offline. Every roll counts, 7s included.
           </li>
           <li>
             <b>Full-Stack Integration</b>: run an operational (fully repaid) AI Factory, hold three sites, touch four resource types and connect four
@@ -643,7 +643,8 @@ export function IntroModal({ onStart, demo, state, viewer = null }: { onStart: (
               <li>
                 {choiceOf(state.rules) === 'compute' ? (
                   <>
-                    <b>Settlers of Compute</b> rules: Infrastructure Financing and Full-Stack Integration are on.
+                    <b>Settlers of Compute</b> rules: Infrastructure Financing and Full-Stack Integration are on
+                    {state?.rules?.gridStability ? ', and Grid Stability keeps disruptions rare (6 calm rolls after each; outages last 4).' : '.'}
                   </>
                 ) : (
                   <>

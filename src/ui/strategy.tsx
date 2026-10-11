@@ -29,7 +29,7 @@ export function sitePips(state: GameState, vertex: number): number {
 }
 
 export function isStalled(state: GameState, vertex: number): boolean {
-  return state.board.vertices[vertex].tileIds.includes(state.disruptionTile);
+  return state.board.tiles[state.disruptionTile].type !== 'barren' && state.board.vertices[vertex].tileIds.includes(state.disruptionTile);
 }
 
 function hexSummary(state: GameState, vertex: number) {
@@ -82,7 +82,12 @@ export function FinancingPanel({ state, player, onRefinance }: { state: GameStat
                     </span>
                   ))}
                 </p>
-                {stalled && <p className="small warn">Stalled: a hex is under the outage, so deliveries there are blocked.</p>}
+                {stalled && (
+                  <p className="small warn">
+                    Stalled: a hex is under the outage, so deliveries there are blocked
+                    {gridStatus(state).outageRolls > 0 ? ` (back online in ${gridStatus(state).outageRolls} roll${gridStatus(state).outageRolls === 1 ? '' : 's'})` : ''}.
+                  </p>
+                )}
                 <button
                   className="btn small refinance-btn"
                   disabled={!check.ok}

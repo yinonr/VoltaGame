@@ -239,3 +239,48 @@ describe('Grid Stability — full AI games', () => {
     expect(suppressed).toBeGreaterThan(0);
   }, 120000);
 });
+
+describe('Grid Stability — QA regressions', () => {
+  const priorityFor = (s: GameState, player: number): GameState => ({
+    ...s,
+    players: s.players.map((p) => (p.id === player ? { ...p, devCards: [{ id: 600, type: 'priority' as const, boughtOnTurn: 0 }] } : p)),
+  });
+
+  it('Priority onto the Dead Zone clears the outage without a fresh 6-roll shield', () => {
+    let s = computeGame();
+    const { tile, number } = target(s);
+    s = disrupt(s, tile);
+    s = quietRoll(quietRoll(s, number), number);
+    expect(s.grid).toEqual({ stableRolls: 4, outageRolls: 2 });
+    s = applyAction(priorityFor({ ...s, devCardPlayedThisTurn: false }, 0), { type: 'PLAY_PRIORITY' });
+    s = applyAction(s, { type: 'MOVE_DISRUPTION', tile: barrenTileId(s.board), victim: null });
+    expect(s.grid).toEqual({ stableRolls: 4, outageRolls: 0 });
+    expect(gridStatus(s).outageTile).toBeNull();
+  });
+
+  it('a natural 7 still starts stabilization when the roller parks the marker on the Dead Zone', () => {
+    let s = computeGame();
+    const { tile } = target(s);
+    s = { ...s, disruptionTile: tile, grid: { stableRolls: 0, outageRolls: 3 } };
+    s = applyAction(roll(s, 7), { type: 'MOVE_DISRUPTION', tile: barrenTileId(s.board), victim: null });
+    expect(s.grid).toEqual({ stableRolls: GRID_STABILITY_ROLLS, outageRolls: 0 });
+  });
+
+  it('clamps edited or corrupt timers', () => {
+    const s = computeGame();
+    const { tile } = target(s);
+    expect(gridStatus({ ...s, disruptionTile: tile, grid: { stableRolls: 99, outageRolls: -5 } })).toMatchObject({ stableRolls: 6, outageRolls: 4 });
+    expect(gridStatus({ ...s, disruptionTile: tile, grid: { stableRolls: 0, outageRolls: 0 } })).toMatchObject({ outageRolls: 4 });
+    expect(gridStatus({ ...s, grid: { stableRolls: 2.7, outageRolls: Number.NaN } })).toMatchObject({ stableRolls: 2, outageRolls: 0 });
+  });
+
+  it('the AI does not spend Priority on an outage that is about to expire', () => {
+    let s = computeGame(11);
+    const { tile, corner } = target(s);
+    const buildings = s.buildings.slice();
+    buildings[corner] = { owner: 0, kind: 'factory' };
+    s = priorityFor({ ...s, buildings, players: s.players.map((p) => ({ ...p, isAI: true })), phase: 'preRoll', disruptionTile: tile }, 0);
+    expect(decideAIAction({ ...s, grid: { stableRolls: 3, outageRolls: 3 } }, 0).type).toBe('PLAY_PRIORITY');
+    expect(decideAIAction({ ...s, grid: { stableRolls: 3, outageRolls: 1 } }, 0).type).toBe('ROLL');
+  });
+});

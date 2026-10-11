@@ -276,7 +276,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
   const rollNote =
     state.lastRoll?.total === 7
       ? state.lastRoll.stabilized
-        ? 'A 7, but the grid is stabilizing: no disruption.'
+        ? 'Grid stable: this 7 causes no disruption.'
         : 'Grid Disruption — no production.'
       : state.lastProduction && viewer !== null
         ? myGains && sumBundle(myGains) > 0

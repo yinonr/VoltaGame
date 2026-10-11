@@ -205,3 +205,11 @@
 .dice-alert.stable {
   color: #67e8f9;
 }
+/* Phones: keep the dice block from pushing End turn off screen; the roll note explains a calm 7. */
+.m-dock .dice-alert {
+  display: none;
+}
+/* Phones: rival notices start below the grid chips. */
+.m-board .rival-feed {
+  top: 52px;
+}

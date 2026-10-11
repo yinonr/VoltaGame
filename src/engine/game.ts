@@ -26,7 +26,7 @@ import { bestSetupRoad, bestSetupVertex } from './evaluation';
 import { applyMarketEvents } from './events';
 import { applyFinancedUpgrade, applyRefinance, isFinanced, outputMultiplier } from './financing';
 import { applyIntegratedDeployment, updateFullStack } from './fullstack';
-import { advanceGrid, gridOf, startDisruption } from './grid';
+import { advanceGrid, gridOf, stabilizeAfterNaturalDisruption, startDisruption } from './grid';
 import { GameError, addLog, announceLongest, gainFromBank, nameOf, pay } from './mutate';
 import { Rng, deriveSeed, randomSeed } from './rng';
 import {
@@ -486,6 +486,7 @@ export function applyAction(state: GameState, action: Action): GameState {
         s.phase = 'main';
       }
       if (grid) advanceGrid(s, grid); // every roll counts down both timers, after it resolves
+      if (grid && total === 7 && !s.lastRoll.stabilized) stabilizeAfterNaturalDisruption(s);
       break;
     }
 

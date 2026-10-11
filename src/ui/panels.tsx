@@ -268,7 +268,7 @@ export function DiceDisplay({ state }: { state: GameState }) {
       )}
       {calm && !rolling && !stale && (
         <span key={shown!.seq} className="dice-alert stable">
-          Grid stable · no disruption
+          Grid stable
         </span>
       )}
     </div>

@@ -29,6 +29,7 @@ const RULES_OPTIONS: { id: RulesChoice; title: string; tag?: string; lines: [str
     lines: [
       ['Infrastructure Financing', `upgrade now for ${describeBundle(FINANCING_COST)}, repay from production.`],
       ['Full-Stack Integration', 'build across the stack to deploy AI Factories directly.'],
+      ['Grid Stability', 'after a Grid Disruption the grid stays calm for 6 rolls; outages last 4.'],
     ],
   },
   {

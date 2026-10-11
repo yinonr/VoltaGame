@@ -24,12 +24,27 @@ export function hasActiveOutage(state: GameState): boolean {
  * gets a full countdown.
  */
 export function gridOf(state: GameState): GridState {
-  return state.grid ?? { stableRolls: 0, outageRolls: hasActiveOutage(state) ? GRID_OUTAGE_ROLLS : 0 };
+  // Clamp to whole numbers in range so an edited save can't create a permanent shield or outage.
+  const clamp = (n: unknown, max: number) => (typeof n === 'number' && Number.isFinite(n) ? Math.min(max, Math.max(0, Math.floor(n))) : 0);
+  const stableRolls = clamp(state.grid?.stableRolls, GRID_STABILITY_ROLLS);
+  const outageRolls = clamp(state.grid?.outageRolls, GRID_OUTAGE_ROLLS);
+  return { stableRolls, outageRolls: hasActiveOutage(state) && outageRolls === 0 ? GRID_OUTAGE_ROLLS : outageRolls };
 }
 
-/** Reducer hook for MOVE_DISRUPTION (natural or card): a new outage and a new stabilization period. */
+/**
+ * Reducer hook for MOVE_DISRUPTION (natural or card). A new outage on a real hex starts its 4-roll
+ * countdown and a new stabilization period. Parking the marker on the Dead Zone just clears the
+ * outage: it does not hand out a fresh 6-roll shield (a natural 7 already started one at the roll).
+ */
 export function startDisruption(s: GameState): void {
-  s.grid = { stableRolls: GRID_STABILITY_ROLLS, outageRolls: hasActiveOutage(s) ? GRID_OUTAGE_ROLLS : 0 };
+  s.grid = hasActiveOutage(s)
+    ? { stableRolls: GRID_STABILITY_ROLLS, outageRolls: GRID_OUTAGE_ROLLS }
+    : { stableRolls: gridOf(s).stableRolls, outageRolls: 0 };
+}
+
+/** Reducer hook after a natural 7 disrupts: stabilization starts with the next roll. */
+export function stabilizeAfterNaturalDisruption(s: GameState): void {
+  s.grid = { ...gridOf(s), stableRolls: GRID_STABILITY_ROLLS };
 }
 
 /** Reducer hook at the end of every ROLL: count both timers down; an outage that runs out expires. */

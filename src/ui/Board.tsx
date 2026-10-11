@@ -222,6 +222,8 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
 
       {/* disruption marker */}
       {(() => {
+        // Grid Stability parks the marker on the Dead Zone between outages: nothing is offline then.
+        if (grid.enabled && grid.outageTile === null) return null;
         const tile = board.tiles[state.disruptionTile];
         const cx = tile.x * S;
         const cy = tile.y * S;
@@ -322,7 +324,7 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
         const co = playerColor(bld.owner);
         // A financed factory wears a dashed ring and a badge with the units it still owes.
         const financed = isFinanced(bld);
-        const stalled = financed && board.vertices[v].tileIds.includes(state.disruptionTile);
+        const stalled = financed && grid.outageTile !== null && board.vertices[v].tileIds.includes(state.disruptionTile);
         return (
           <g key={`b-${v}-${bld.kind}`} className={`building ${bld.kind}`}>
             {financed && <circle cx={vx} cy={vy} r={21} className={`financed-ring${stalled ? ' stalled' : ''}`} />}

@@ -26,6 +26,7 @@ import {
   outputMultiplier,
   refinanceCost,
 } from './financing';
+import { gridStatus } from './grid';
 import {
   FULLSTACK_MIN_NETWORK,
   checkIntegratedDeployment,
@@ -488,6 +489,8 @@ function chooseDisruption(state: GameState, player: number): Action {
 function disruptionHurtsMe(state: GameState, player: number): boolean {
   const tile = state.board.tiles[state.disruptionTile];
   if (tile.type === 'barren') return false;
+  const grid = gridStatus(state);
+  if (grid.enabled && grid.outageRolls <= 1) return false; // about to come back online anyway
   let hurt = 0;
   for (const v of tile.vertexIds) {
     const b = state.buildings[v];
