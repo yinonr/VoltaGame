@@ -7,7 +7,7 @@ _Last updated: 2026-10-11, end of session 1 (the mobile + deployment continuatio
 | Branch | Commit | What it is | Deployed? |
 | --- | --- | --- | --- |
 | `main` (= `claude/new-session-4osyq1`) | `37c229b` | The stable interview build: V1 game, mobile layout, Quick Demo | **Yes**, live at https://yinonr.github.io/VoltaGame/ |
-| **`claude/volta-branding`** | see `git log -1 origin/claude/volta-branding` | Staged Volta co-branding, the Full-Stack Integration card, and the Volta cards spec | **No.** Do **not** merge into `main` or deploy without the owner's approval. |
+| **`claude/volta-branding`** | see `git log -1 origin/claude/volta-branding` | New Game–first title screen (Quick Demo hidden, `#demo`), staged Volta co-branding (approved for the prototype; volta.com link), the Full-Stack Integration card, and the Volta cards spec | **No.** Do **not** merge into `main` or deploy without the owner's approval. |
 
 ### Feature-branch work (`claude/volta-branding`)
 
@@ -27,23 +27,39 @@ _Last updated: 2026-10-11, end of session 1 (the mobile + deployment continuatio
   - The default deck is unchanged (25 cards), so the Quick Demo, AI seeds and all earlier tests behave exactly as before. The mobile regression suite was re-run on this branch and passed.
 - **Infrastructure Financing card: designed, NOT implemented.** The full spec and step-by-step implementation plan are in `docs/VOLTA_SPECIAL_CARDS.md`. Two independent adversarial reviewers checked the spec against the engine. All 15 of their findings are incorporated, among them the circular AI rule, immutability of Building objects, phantom shortages, six "factories produce double" call sites, Refinance UI placement, and corrected pip math.
 
-### How to view the branded build locally
+### Entry experience (changed on this branch)
+
+- **New Game is now the primary title-screen action** ("▶ New Game — Found your AI company · You vs. 3 AI rivals"). Players start their own company on turn one.
+- **Quick Demo is hidden from the entry flow.** That covers the title button, the winner-screen "Replay Quick Demo" and the mobile menu item. Its implementation, deterministic scenario and tests are all preserved. Open the site with `#demo` to show it, e.g. `…/VoltaGame/#demo` (`src/ui/flags.ts`).
+- Custom game, pass-and-play, autosave/continue, How to play and About are unchanged.
+
+### Volta branding status
+
+- **Approved by the owner for the interview prototype:** the creative direction, "Brought to you by Volta", the tagline "The race to build the AI economy.", and the victory line "The next generation of AI runs on infrastructure."
+- **Not** Volta's authorization for public sponsorship claims. The production gate stays: production builds remain unbranded unless `VITE_VOLTA_BRANDING=on`.
+- **Website:** `https://volta.com` is configured in `.env.development` (used by `npm run dev`) and `.env.branded` (used by `npm run build:branded`). The branded victory screen's "Visit Volta →" was verified: `href="https://volta.com"`, new tab, `noopener noreferrer`. volta.com itself can't be loaded from the build environment.
+- **Wordmark:** still the typographic "VOLTA" placeholder until an approved logo asset exists.
 
 ```bash
-git checkout claude/volta-branding && npm install
-npm run dev                                   # branding on by default in dev
-VITE_VOLTA_BRANDING=on npm run build && npm run preview   # branded production build
-VITE_VOLTA_URL=https://<confirmed-volta-site> npm run dev  # also shows the "Visit Volta →" link
+npm run dev                                   # branded dev build with the volta.com link
+npm run build:branded && npm run preview      # branded production-style build at /VoltaGame/
+npm run build                                 # public build: unbranded (what main deploys)
 ```
 
-### First task for the next session
+## Next development session: order of work
 
-Decide what the next session is for: online multiplayer, or Infrastructure Financing.
+1. **Infrastructure Financing (first).** Work on `claude/volta-branding`, following `docs/VOLTA_SPECIAL_CARDS.md`, including its "Final pre-implementation check".
+   1. Game state, actions, rules and scoring: `Building.financed`, `PLAY_FINANCING`, `REFINANCE`, `checkPlayCard('financing')`, `checkRefinance`, and the `scoreBreakdown` semantics.
+   2. Deferred production commitments with correct accounting: rule 2's pending deliveries, the shortage gate, never mutating a Building, and `outputMultiplier` at every call site.
+   3. **Comprehensive automated tests before any UI.** The full test list is in the spec.
+   4. AI decisions: when to finance, when to refinance, and outage targeting.
+   5. Desktop and mobile interactions: placement mode, the board badge, and a Commitment row with Refinance.
+   6. Test the full card lifecycle in the browser at 1440×900 and 390×844.
+2. **Balance both Volta cards (second).** Run many seeded AI-only games with both cards on, and compare game length, winners, card usage and strategic value against the standard game. Check the cards are interesting but not overpowered. Decide whether they should join the default deck instead of staying behind Custom game → "Special cards (beta)". Keep determinism and the regression coverage, and re-baseline seeds deliberately.
+3. **Reconsider onboarding (third).** Look at how beginners learn from turn one, and prefer lightweight contextual hints over a fixed midgame demo. Keep Quick Demo as an internal/testing feature (`#demo`) unless there's a compelling reason to restore it.
+4. **Online multiplayer (fourth).** Keep `docs/MULTIPLAYER_PLAN.md`, and don't start until the Volta mechanics and core experience are polished.
 
-- **If multiplayer:** branch from `main`, not from `claude/volta-branding`, unless the owner approves the branding. Leave the branding branch alone.
-- **If Infrastructure Financing:** work on `claude/volta-branding` and follow the "Implementation steps for the next session" in `docs/VOLTA_SPECIAL_CARDS.md` in order. Start with the engine and tests (steps 1–6, plus the step-9 tests) before any UI.
-
-Before publishing any Volta branding: get approval for the sponsorship language, swap in the official logo, set `VITE_VOLTA_URL`, and add `VITE_VOLTA_BRANDING=on` to the build step in `.github/workflows/deploy.yml`.
+**Throughout:** keep `main` and the live site unchanged unless the owner approves a merge.
 
 ## Where things are
 

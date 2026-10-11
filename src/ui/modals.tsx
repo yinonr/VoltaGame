@@ -5,6 +5,7 @@ import { bankRate, checkBankTrade, checkTradePhase } from '../engine/rules';
 import { scoreBreakdown } from '../engine/scoring';
 import type { Action, GameState, Resource, ResourceBundle } from '../engine/types';
 import { RESOURCES } from '../engine/types';
+import { SHOW_QUICK_DEMO } from './flags';
 import { ResourceIcon } from './icons';
 import { CompanyDot } from './panels';
 import { VOLTA_BRANDING, VOLTA_SITE_URL, VoltaWordmark } from './brand';
@@ -446,9 +447,11 @@ export function WinnerModal({
         <button className="btn" onClick={onClose}>
           Inspect board
         </button>
+{SHOW_QUICK_DEMO && (
         <button className="btn" onClick={onDemo}>
           Replay Quick Demo
         </button>
+)}
         <button className="btn primary" onClick={onNewGame}>
           New game
         </button>

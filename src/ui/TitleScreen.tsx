@@ -6,6 +6,7 @@ import { ResourceIcon } from './icons';
 import { CompanyDot } from './panels';
 import { AboutModal, RulesModal } from './modals';
 import { VOLTA_BRANDING, VoltaWordmark } from './brand';
+import { SHOW_QUICK_DEMO } from './flags';
 
 export interface CustomOptions {
   seats: SeatConfig[];
@@ -86,12 +87,14 @@ export function TitleScreen({
 
         {!custom ? (
           <div className="title-actions">
-            <button className="btn primary big" onClick={onDemo}>
-              ▶ Quick Demo <span className="btn-sub">Jump into a live midgame — 60 seconds to your first big move</span>
+            <button className="btn primary big" onClick={onQuickStart}>
+              ▶ New Game <span className="btn-sub">Found your AI company · You vs. 3 AI rivals</span>
             </button>
-            <button className="btn big" onClick={onQuickStart}>
-              New Game <span className="btn-sub">You vs. 3 AI companies · Quick Start opening</span>
-            </button>
+            {SHOW_QUICK_DEMO && (
+              <button className="btn big" onClick={onDemo}>
+                Quick Demo <span className="btn-sub">Internal: a deterministic midgame scenario</span>
+              </button>
+            )}
             <div className="title-row">
               {hasSave && (
                 <button className="btn" onClick={onContinue}>

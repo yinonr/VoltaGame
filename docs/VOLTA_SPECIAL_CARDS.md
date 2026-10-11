@@ -250,6 +250,27 @@ The originally written rule ("goal is factory" **and** "missing at least 2 Capit
    - full AI games with both cards finish and conserve resources.
 10. **Docs:** update `GAME_DESIGN.md` and the in-game rules modal for both cards.
 
+## Final pre-implementation check (end of session 1): no blockers
+
+These clarifications close the remaining gaps. Treat them as part of the spec.
+
+- **Conservation:** the committed unit never leaves the market. The owner receives 1, and the bank keeps the other. The resource-conservation assertion (19 of each resource, summed across market and hands) must hold in every Financing test and full-game test.
+- **When completion lets you win:**
+  - On the owner's own roll, the ROLL action's reducer tail runs `checkVictory` for the current player, so the owner can win at once.
+  - On a rival's roll, the owner wins only when their own turn begins (rule 4).
+  - Refinance can win at once, because the owner always refinances on their own turn.
+- **No production, no delivery:** a 7 produces nothing, so nothing is delivered. Discards and steals touch hands only and never the commitment. Infrastructure Priority's outage move can target a financed factory; that's intended.
+- **Refinance timing:** main phase only, on your own turn, and only for your own financed factory. You may play Market Consolidation on Capital and then refinance in the same turn, since Refinance is not a card play. That costs a card, so it's fine.
+- **Full-Stack Integration compatibility:**
+  - Integration always places an unfinanced factory.
+  - A player may hold both cards, but can play at most one per turn.
+  - Both draw from the same 4-factory piece limit.
+  - AI priority when both are playable: Integration if affordable (+2 CP now), otherwise Financing.
+  - The two AI goals must not both claim the same GPUs. When the Integration goal is active, skip the Financing goal pricing.
+  - Grant, Consolidation, Expansion and Breakthrough are unaffected.
+- **Saves:** `Building.financed`, `ProductionReport.deliveries` and `GameState.voltaCards` are all optional. Old saves load as "no commitments, Volta cards off".
+- **Determinism and test re-baseline:** adding 2 Financing cards changes the shuffle of the Volta deck (27 → 29). The Integration play-rate test will then see different games, so re-measure it and re-baseline its floor. The default 25-card deck is untouched, so the standard game, the Quick Demo and their tests are unaffected.
+
 ## Independent review (incorporated)
 
 Two independent adversarial reviewers checked this spec against the actual engine: an exploit/balance lens and a state-management lens. They produced 15 findings, and all were incorporated.

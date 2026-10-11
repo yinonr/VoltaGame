@@ -32,6 +32,7 @@ import { BottomSheet, COMPACT_QUERY, useMediaQuery, ZOOM_LEVELS, ZoomableBoard }
 import { ResourceIcon } from './icons';
 import { scoreBreakdown } from '../engine/scoring';
 import { RESOURCES } from '../engine/types';
+import { SHOW_QUICK_DEMO } from './flags';
 import type { GameController } from './useGame';
 
 interface Props {
@@ -495,9 +496,11 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
                 >
                   How to play
                 </button>
+{SHOW_QUICK_DEMO && (
                 <button className="btn" onClick={onDemo}>
                   Restart Quick Demo
                 </button>
+)}
                 <button className="btn" onClick={onNewGame}>
                   New game vs 3 AI
                 </button>

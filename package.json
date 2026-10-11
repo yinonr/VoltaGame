@@ -3,14 +3,15 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Settlers of Compute — an unofficial, Catan-inspired browser strategy game about the AI compute economy.",
+  "description": "Settlers of Compute \u2014 an unofficial, Catan-inspired browser strategy game about the AI compute economy.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "build:branded": "tsc -b && vite build --mode branded"
   },
   "dependencies": {
     "react": "^19.3.0",
