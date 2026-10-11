@@ -10,7 +10,8 @@ import { RESOURCES } from './types';
 // Full-Stack Integration — an earned, permanent company status (rules.fullStack). A company that
 // has built across the whole stack (operational factory, several sites, broad resource access,
 // a connected network) unlocks Integrated Deployment: an AI Factory straight onto an open site.
-// Thresholds are calibrated by simulation: docs/FULLSTACK_CALIBRATION.md.
+// Thresholds are calibrated by simulation: docs/FULLSTACK_CALIBRATION.md (COMPUTE_RULES, 200 all-AI
+// games: 77% of companies unlock, median 5 CP in round 10 of 14; the network milestone binds most).
 
 /** Unfinanced (operational) AI Factories needed. */
 export const FULLSTACK_MIN_FACTORIES = 1;

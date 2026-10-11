@@ -2,6 +2,7 @@ import {
   COSTS,
   FINANCING_COST,
   FINANCING_MAX_OUTSTANDING,
+  INTEGRATED_DEPLOYMENT_COST,
   INTEGRATION_COST,
   RESOURCE_INFO,
   VP_TO_WIN,
@@ -25,6 +26,15 @@ import {
   outputMultiplier,
   refinanceCost,
 } from './financing';
+import {
+  FULLSTACK_MIN_NETWORK,
+  checkIntegratedDeployment,
+  fullStackProgress,
+  hasFullStack,
+  largestConnectedNetwork,
+  touchedResourceTypes,
+} from './fullstack';
+import type { MilestoneId } from './fullstack';
 import { disruptionVictims } from './game';
 import {
   bankRate,
@@ -49,8 +59,9 @@ interface Goal {
   /**
    * 'integration' = save up for a held Expedited Deployment card (legacy id 'integration').
    * 'financing' = save GPUs for a financed AI Factory upgrade (rules.financing).
+   * 'deployment' = save for Integrated Deployment once Full-Stack is unlocked (rules.fullStack).
    */
-  kind: BuildType | 'integration' | 'financing';
+  kind: BuildType | 'integration' | 'financing' | 'deployment';
   cost: ResourceBundle;
   /** Rough priority score used to rank goals. */
   score: number;
@@ -144,12 +155,81 @@ function refinanceAction(state: GameState, player: number, endOfTurn: boolean): 
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Full-Stack Integration (rules.fullStack only; Classic decisions never reach this code)
+// ---------------------------------------------------------------------------
+
+/**
+ * What Full-Stack means for this company's next decisions, or null when it changes nothing (the rule
+ * is off, or the company is locked and more than one cheap step away). Light-touch on purpose: the
+ * AI chases the status only when a single, cheap milestone is missing; factory and site milestones
+ * already have their own goals.
+ */
+interface FullStackPlan {
+  /** Unlocked: Integrated Deployment is available whenever pieces, sites and resources allow. */
+  unlocked: boolean;
+  /** The one missing milestone worth chasing right now. */
+  chase: Extract<MilestoneId, 'resources' | 'network'> | null;
+  /** Resource types the company's buildings already touch (for the 'resources' chase). */
+  touched: Resource[];
+  /** Largest connected group of own connections (for the 'network' chase). */
+  network: number;
+}
+
+/** Bonus for a new site that touches a missing resource type when that is the last milestone. */
+const FULLSTACK_TYPE_BONUS = 2;
+/** Bonus for a connection that grows the largest connected group when that is the last milestone. */
+const FULLSTACK_NETWORK_BONUS = 3;
+/** Chase the network milestone only when this many connections (or fewer) are still missing. */
+const FULLSTACK_NETWORK_GAP = 2;
+/** Integrated Deployment only onto a site worth at least this much (vertexValue); else upgrade instead. */
+const MIN_DEPLOY_SITE_VALUE = 3;
+
+function fullStackPlan(state: GameState, player: number): FullStackPlan | null {
+  if (!rulesOf(state).fullStack) return null;
+  if (hasFullStack(state, player)) return { unlocked: true, chase: null, touched: [], network: 0 };
+  const missing = fullStackProgress(state, player).milestones.filter((m) => !m.done);
+  if (missing.length !== 1) return null;
+  const id = missing[0].id;
+  if (id === 'resources') return { unlocked: false, chase: id, touched: touchedResourceTypes(state, player), network: 0 };
+  if (id === 'network') {
+    const network = largestConnectedNetwork(state, player);
+    if (FULLSTACK_MIN_NETWORK - network <= FULLSTACK_NETWORK_GAP) return { unlocked: false, chase: id, touched: [], network };
+  }
+  return null;
+}
+
+/** Extra value of a site for the 'resources' chase: it touches a numbered hex of a type the company lacks. */
+function fullStackSiteBonus(state: GameState, vertex: number, plan: FullStackPlan | null): number {
+  if (!plan || plan.chase !== 'resources') return 0;
+  for (const t of state.board.vertices[vertex].tileIds) {
+    const tile = state.board.tiles[t];
+    if (tile.type !== 'barren' && tile.number !== null && !plan.touched.includes(tile.type)) return FULLSTACK_TYPE_BONUS;
+  }
+  return 0;
+}
+
+/** Site value for building decisions: vertexValue, plus the Full-Stack bonus when one applies. */
+function siteValue(state: GameState, vertex: number, player: number, prod: ResourceBundle, plan: FullStackPlan | null): number {
+  const value = vertexValue(state, vertex, player, prod);
+  return plan ? value + fullStackSiteBonus(state, vertex, plan) : value;
+}
+
+/** Integrated Deployment right now: legal, affordable, and onto a site worth it (+2 CP in one move). */
+function deploymentAction(state: GameState, player: number): Action | null {
+  if (!hasFullStack(state, player) || !checkIntegratedDeployment(state, player).ok) return null;
+  const { vertex, value } = bestClusterVertex(state, player);
+  if (vertex < 0 || value < MIN_DEPLOY_SITE_VALUE) return null;
+  return { type: 'BUILD_INTEGRATED_FACTORY', vertex };
+}
+
 function bestClusterVertex(state: GameState, player: number): { vertex: number; value: number } {
   let best = -1;
   let bestScore = -Infinity;
   const prod = productionPips(state, player, true);
+  const plan = fullStackPlan(state, player);
   for (const v of legalClusterVertices(state, player)) {
-    const score = vertexValue(state, v, player, prod);
+    const score = siteValue(state, v, player, prod, plan);
     if (score > bestScore) {
       bestScore = score;
       best = v;
@@ -159,22 +239,24 @@ function bestClusterVertex(state: GameState, player: number): { vertex: number; 
 }
 
 /** Value of building a road on `edge`: how good a future site it opens up, plus network length. */
-function roadValue(state: GameState, player: number, edge: number, currentLongest: number): number {
+function roadValue(state: GameState, player: number, edge: number, currentLongest: number, plan: FullStackPlan | null): number {
   const e = state.board.edges[edge];
   const prod = productionPips(state, player, true);
   let best = 0;
   for (const u of [e.a, e.b]) {
     const b = state.buildings[u];
     if (b && b.owner !== player) continue;
-    if (isVertexOpen(state, u)) best = Math.max(best, vertexValue(state, u, player, prod));
+    if (isVertexOpen(state, u)) best = Math.max(best, siteValue(state, u, player, prod, plan));
     for (const n of state.board.vertices[u].neighborIds) {
       if (n === e.a || n === e.b) continue;
-      if (isVertexOpen(state, n)) best = Math.max(best, 0.7 * vertexValue(state, n, player, prod));
+      if (isVertexOpen(state, n)) best = Math.max(best, 0.7 * siteValue(state, n, player, prod, plan));
     }
   }
   // Longest Network race: reward roads that extend our trail.
   const roads = state.roads.slice();
   roads[edge] = player;
+  // Full-Stack 'network' chase: reward a connection that grows the largest connected group.
+  if (plan?.chase === 'network' && largestConnectedNetwork({ ...state, roads }, player) > plan.network) best += FULLSTACK_NETWORK_BONUS;
   const extended = longestNetwork({ ...state, roads }, player);
   if (extended > currentLongest && extended >= 4) {
     const holder = state.longestRoadHolder;
@@ -187,10 +269,11 @@ function roadValue(state: GameState, player: number, edge: number, currentLonges
 
 function bestRoadEdge(state: GameState, player: number): { edge: number; value: number } {
   const current = longestNetwork(state, player);
+  const plan = fullStackPlan(state, player);
   let best = -1;
   let bestScore = -Infinity;
   for (const e of legalRoadEdges(state, player)) {
-    const score = roadValue(state, player, e, current);
+    const score = roadValue(state, player, e, current, plan);
     if (score > bestScore) {
       bestScore = score;
       best = e;
@@ -210,6 +293,16 @@ function goals(state: GameState, player: number): Goal[] {
   if (savingForCard) {
     out.push({ kind: 'integration', cost: INTEGRATION_COST, score: 4.2 * st.factories });
   }
+  // Full-Stack: Integrated Deployment, priced at its own 8-resource cost. Its cost contains a standard
+  // upgrade's, so it is ranked just enough above that goal (+1.0) to win when at most one of its extra
+  // Power/Networking/Land is missing (calibrated: docs/FULLSTACK_CALIBRATION.md). Never alongside the
+  // cheaper card goal, so the two never claim the same GPUs. Only toward a site deploymentAction accepts,
+  // or the AI would hold back its other builds for a deployment it then declines.
+  const plan = fullStackPlan(state, player);
+  const canDeploy = !!plan?.unlocked && left.factory > 0;
+  if (canDeploy && hasClusterSite && !savingForCard && bestClusterVertex(state, player).value >= MIN_DEPLOY_SITE_VALUE) {
+    out.push({ kind: 'deployment', cost: INTEGRATED_DEPLOYMENT_COST, score: 4.4 * st.factories });
+  }
   if (left.factory > 0 && legalFactoryVertices(state, player).length > 0) {
     out.push({ kind: 'factory', cost: COSTS.factory, score: 3.4 * st.factories });
   }
@@ -222,7 +315,11 @@ function goals(state: GameState, player: number): Goal[] {
   if (left.cluster > 0 && hasClusterSite) {
     out.push({ kind: 'cluster', cost: COSTS.cluster, score: 3.6 * st.expansion });
   }
-  if ((left.cluster > 0 || (holdsIntegration && left.factory > 0)) && !hasClusterSite && left.road > 0 && legalRoadEdges(state, player).length > 0) {
+  if ((left.cluster > 0 || (holdsIntegration && left.factory > 0) || canDeploy) && !hasClusterSite && left.road > 0 && legalRoadEdges(state, player).length > 0) {
+    out.push({ kind: 'road', cost: COSTS.road, score: 2.6 * st.expansion });
+  }
+  // Full-Stack: one or two connections away from the last milestone — worth saving for.
+  if (plan?.chase === 'network' && left.road > 0 && legalRoadEdges(state, player).length > 0) {
     out.push({ kind: 'road', cost: COSTS.road, score: 2.6 * st.expansion });
   }
   if (state.devDeck.length > 0) {
@@ -310,7 +407,7 @@ export function evaluateOffer(state: GameState, player: number, offer: TradeOffe
 
   if (gain - loss >= threshold) {
     const what = goal
-      ? `${goal.kind === 'card' ? 'an Innovation Card' : goal.kind === 'factory' || goal.kind === 'integration' || goal.kind === 'financing' ? 'an AI Factory' : goal.kind === 'cluster' ? 'a new cluster' : 'a new connection'}`
+      ? `${goal.kind === 'card' ? 'an Innovation Card' : goal.kind === 'factory' || goal.kind === 'integration' || goal.kind === 'financing' || goal.kind === 'deployment' ? 'an AI Factory' : goal.kind === 'cluster' ? 'a new cluster' : 'a new connection'}`
       : 'its plans';
     return {
       accept: true,
@@ -528,9 +625,19 @@ function mainPhase(state: GameState, player: number): Action {
   const card = cardAction(state, player, goal);
   if (card) return card;
 
-  // Immediate high-value builds — unless we're one resource away from an integrated deployment,
-  // which needs the same Capital and GPUs and scores twice as much.
-  const savingForIntegration = goal?.kind === 'integration' && sumBundle(missingFor(have, goal.cost)) <= 1;
+  // Full-Stack: Integrated Deployment beats both a plain cluster and an upgrade this turn (+2 CP, new site).
+  if (rulesOf(state).fullStack) {
+    const deploy = deploymentAction(state, player);
+    if (deploy) return deploy;
+  }
+
+  // Immediate high-value builds — unless we're one resource away from an integrated deployment (the
+  // Expedited Deployment card, or Full-Stack's Integrated Deployment), which needs the same Capital and
+  // GPUs and scores twice as much.
+  const savingForIntegration =
+    (goal?.kind === 'integration' || goal?.kind === 'deployment') && sumBundle(missingFor(have, goal.cost)) <= 1;
+  // Integrated Deployment also needs a cluster's Power, Networking and Land: don't spend them on one now.
+  const savingForDeployment = savingForIntegration && goal?.kind === 'deployment';
   if (!savingForIntegration && checkBuild(state, player, 'factory').ok) {
     return { type: 'BUILD_FACTORY', vertex: bestFactoryVertex(state, player) };
   }
@@ -538,7 +645,7 @@ function mainPhase(state: GameState, player: number): Action {
   if (financing && !savingForIntegration && wantsFinancing(state, player)) {
     return { type: 'BUILD_FINANCED_FACTORY', vertex: bestFinancingVertex(state, player).vertex };
   }
-  if (checkBuild(state, player, 'cluster').ok) {
+  if (!savingForDeployment && checkBuild(state, player, 'cluster').ok) {
     return { type: 'BUILD_CLUSTER', vertex: bestClusterVertex(state, player).vertex };
   }
 
