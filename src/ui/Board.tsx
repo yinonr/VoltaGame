@@ -7,6 +7,12 @@ const S = 64; // pixels per unit hex radius
 
 export type Ghost = 'road' | 'cluster' | 'factory' | null;
 
+/** A board spot chosen on touch devices, awaiting confirmation. */
+export interface BoardTarget {
+  kind: 'vertex' | 'edge' | 'tile';
+  id: number;
+}
+
 interface BoardProps {
   state: GameState;
   highlightVertices: Set<number>;
@@ -19,6 +25,10 @@ interface BoardProps {
   onTile: (t: number) => void;
   /** Tiles to mark as "disruption candidates" with a warning style. */
   tileMode?: 'disrupt' | null;
+  /** Touch layout: larger hit areas. */
+  touch?: boolean;
+  /** Spot selected (touch) and awaiting confirmation. */
+  selected?: BoardTarget | null;
 }
 
 function hexPoints(cx: number, cy: number, r: number): string {
@@ -60,7 +70,7 @@ export function FactoryShape({ x, y, color, stroke, scale = 1, ghost = false }: 
   );
 }
 
-export function Board({ state, highlightVertices, highlightEdges, highlightTiles, ghost, ghostColor, onVertex, onEdge, onTile, tileMode }: BoardProps) {
+export function Board({ state, highlightVertices, highlightEdges, highlightTiles, ghost, ghostColor, onVertex, onEdge, onTile, tileMode, touch = false, selected = null }: BoardProps) {
   const { board } = state;
   const [hoverV, setHoverV] = useState<number | null>(null);
   const [hoverE, setHoverE] = useState<number | null>(null);
@@ -230,7 +240,7 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
         const y1 = a.y + (b.y - a.y) * 0.18;
         const x2 = a.x + (b.x - a.x) * 0.82;
         const y2 = a.y + (b.y - a.y) * 0.82;
-        const hovered = hoverE === e.id;
+        const hovered = touch ? selected?.kind === 'edge' && selected.id === e.id : hoverE === e.id;
         return (
           <g
             key={`he-${e.id}`}
@@ -246,7 +256,7 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
             aria-label="Build connection here"
           >
             <line x1={x1 * S} y1={y1 * S} x2={x2 * S} y2={y2 * S} className={`edge-hl${hovered ? ' hover' : ''}`} style={{ stroke: hovered ? ghostColor : undefined }} />
-            <line x1={a.x * S} y1={a.y * S} x2={b.x * S} y2={b.y * S} stroke="transparent" strokeWidth={22} />
+            <line x1={a.x * S} y1={a.y * S} x2={b.x * S} y2={b.y * S} stroke="transparent" strokeWidth={touch ? 34 : 22} />
           </g>
         );
       })}
@@ -272,7 +282,7 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
       {/* vertex highlights */}
       {board.vertices.map((vert) => {
         if (!highlightVertices.has(vert.id)) return null;
-        const hovered = hoverV === vert.id;
+        const hovered = touch ? selected?.kind === 'vertex' && selected.id === vert.id : hoverV === vert.id;
         const vx = vert.x * S;
         const vy = vert.y * S;
         return (
@@ -289,10 +299,10 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
             role="button"
             aria-label="Build here"
           >
-            <circle cx={vx} cy={vy} r={hovered ? 15 : 10} className="vertex-hl" />
+            <circle cx={vx} cy={vy} r={hovered ? 15 : touch ? 12 : 10} className={`vertex-hl${hovered && touch ? ' chosen' : ''}`} />
             {hovered && ghost === 'cluster' && <ClusterShape x={vx} y={vy} color={ghostColor} stroke="#0b1020" ghost />}
             {hovered && ghost === 'factory' && <FactoryShape x={vx} y={vy} color={ghostColor} stroke="#0b1020" ghost />}
-            <circle cx={vx} cy={vy} r={18} fill="transparent" />
+            <circle cx={vx} cy={vy} r={touch ? 30 : 18} fill="transparent" />
           </g>
         );
       })}
@@ -310,7 +320,10 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
             role="button"
             aria-label={`Move Grid Disruption to ${tile.type === 'barren' ? 'the Dead Zone' : RESOURCE_INFO[tile.type].label}${tile.number ? ` ${tile.number}` : ''}`}
           >
-            <polygon points={hexPoints(tile.x * S, tile.y * S, S * 0.9)} className={`tile-hl${tileMode === 'disrupt' ? ' disrupt' : ''}`} />
+            <polygon
+              points={hexPoints(tile.x * S, tile.y * S, S * 0.9)}
+              className={`tile-hl${tileMode === 'disrupt' ? ' disrupt' : ''}${selected?.kind === 'tile' && selected.id === tile.id ? ' chosen' : ''}`}
+            />
           </g>
         );
       })}

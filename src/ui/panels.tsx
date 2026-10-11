@@ -149,7 +149,7 @@ export function DiceDisplay({ state }: { state: GameState }) {
 // Hand
 // ---------------------------------------------------------------------------
 
-function FlashCount({ value }: { value: number }) {
+export function FlashCount({ value }: { value: number }) {
   const prev = useRef(value);
   const [flash, setFlash] = useState<'up' | 'down' | null>(null);
   useEffect(() => {

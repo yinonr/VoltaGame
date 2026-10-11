@@ -392,6 +392,7 @@ export function WinnerModal({
             : `${winner.name} (${c.sector}) reached ${standings[0].sb.total} Compute Points in ${Math.ceil(state.turn / state.players.length)} rounds. The market is still young — run it back.`}
         </p>
       </div>
+      <div className="standings-wrap">
       <table className="standings">
         <thead>
           <tr>
@@ -423,6 +424,7 @@ export function WinnerModal({
           ))}
         </tbody>
       </table>
+      </div>
       <div className="modal-actions">
         <button className="btn" onClick={onTitle}>
           Title screen
