@@ -1,6 +1,15 @@
 # Handoff — Settlers of Compute
 
-_Last updated: 2026-10-11, end of Session 3 (recover, integrate, finish). Interview: Monday, October 12, 2026._
+_Last updated: 2026-10-11, Session 3 final sprint (Grid Stability). Interview: Monday, October 12, 2026._
+
+> **Final sprint update.** **Grid Stability** is now part of the Settlers of Compute rules. Classic is unchanged.
+>
+> - **What it does:** after a Grid Disruption the next 6 rolls are protected (a 7 causes no discard, theft or outage move), and an outage blocks its hex for 4 rolls, then expires.
+> - **Effect** (600 games): natural disruptions −55%, thefts −52%, discards −35%. A hex is offline on 35% of rolls instead of about 90%. Games are about 1.5 rounds shorter. Financing is unchanged (debt-free seat 22.5%).
+> - **Verification:** an independent QA agent tested five personas in headless Chromium. All its findings were fixed and rechecked: the High was End turn clipped on phones after a calm 7; the Mediums were a false "stalled" badge and a stale OUTAGE marker.
+> - **Results:** 180 tests pass; both builds pass. The release candidate is the latest commit of `claude/new-session-6i54u3`.
+> - **The previous candidate** `cb38388` is tagged locally as `rc-session3-cb38388`; that tag was not pushed.
+> - **Docs:** `docs/STRATEGIC_SYSTEMS.md` → Grid Stability, `docs/BALANCE.md`, and `docs/INNOVATION_CARDS.md` (temporary card designs for the next session).
 
 ## Status in one paragraph
 
@@ -114,10 +123,11 @@ Players see a New Game setup (name, rivals, rules). The default game uses Infras
 ## Next session (priority order)
 
 1. **Owner review on a real phone**, then publish (see above). Fix only what that review finds.
-2. **Market events:** restore `s2/events` from `recovery/`, update it to the 5-unit commitment and the ceiling of 6, keep it behind a Custom-game "Market events (experimental)" toggle, and rerun the balance probe.
-3. **Human playtests of the Compute rules.** Watch the card economy and how often humans use Integrated Deployment; consider the 7-resource recipe only if it is rarely used.
-4. **Onboarding:** light contextual hints on the first turns (for example the first financed upgrade, the first milestone).
-5. **Online multiplayer**, last (`docs/MULTIPLAYER_PLAN.md`).
+2. **Innovation Cards** (`docs/INNOVATION_CARDS.md`): prototype GPU Optimization, then Nuclear Power Plant (end the current outage), then Battery Storage, as Compute-only deck additions.
+3. **Market events:** restore `s2/events` from `recovery/`, update it to the 5-unit commitment and the ceiling of 6, keep it behind a Custom-game "Market events (experimental)" toggle, and rerun the balance probe.
+4. **Human playtests of the Compute rules.** Watch the card economy and how often humans use Integrated Deployment; consider the 7-resource recipe only if it is rarely used.
+5. **Onboarding:** light contextual hints on the first turns (for example the first financed upgrade, the first milestone).
+6. **Online multiplayer**, last (`docs/MULTIPLAYER_PLAN.md`).
 
 ## Commands
 

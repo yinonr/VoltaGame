@@ -61,6 +61,11 @@ React 19 + TypeScript + Vite 8 + Vitest 5, SVG board, plain CSS, fully static.
   - it unlocks repeatable **Integrated Deployment**: a full AI Factory on an open network site for 1 Power + 1 Networking + 1 Land + 3 Capital + 2 GPUs, worth +2 CP.
 - **Expedited Deployment:** the renamed legacy beta card (Custom game → "Special cards (beta)").
 - **AI trade offers to humans:** rate-limited (about 2 per game instead of about 11).
+- **Grid Stability** (Compute rules, `rules.gridStability`):
+  - after a disruption, 6 protected rolls (a 7 causes no discard, theft or outage move);
+  - outages last 4 rolls, then the marker parks on the Dead Zone;
+  - Priority restarts both timers when it knocks a hex offline.
+  - The timers live in `GameState.grid`.
 
 ## Guardrails
 

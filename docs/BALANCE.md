@@ -118,8 +118,8 @@ Grid Stability is part of the Compute rules: after a disruption the next 6 rolls
 | --- | --- | --- | --- |
 | Game length, rounds | 18.1 | 16.6 | **15.0** |
 | Natural disruptions | 11.7 | 10.8 | **4.9** (−55%) |
-| 7s absorbed by the stabilizing grid | — | — | 4.8 |
-| Infrastructure Priority plays | 3.1 | 1.6 | 1.1 |
+| 7s absorbed by the stabilizing grid | — | — | 4.9 |
+| Infrastructure Priority plays | 3.1 | 1.6 | 1.0 |
 | Rolls with a hex offline | 91% | 91% | **35%** |
 | Average outage length (rolls) | persistent | persistent | 3.4 (rule: 4; Priority and new disruptions can end one early) |
 | Discards | 6.5 | 5.5 | **3.5** |
@@ -130,7 +130,7 @@ Grid Stability is part of the Compute rules: after a disruption the next 6 rolls
 | Win share P / H / A / S (%) | 28 / 34 / 22 / 17 | 31 / 31 / 22 / 17 | 33 / 29 / 21 / 18 |
 | Stalls | 0 | 0 | 0 |
 
-**Debt-free probe under Grid Stability:** 23.5% (141/600; fair 25%), against 22.6% without it. Financing did **not** get stronger, so no economy change was made.
+**Debt-free probe under Grid Stability** (rerun after the QA fixes): 22.5% (135/600; fair 25%), against 22.6% without it. Financing did **not** get stronger, so no economy change was made.
 
 **Reading:**
 
