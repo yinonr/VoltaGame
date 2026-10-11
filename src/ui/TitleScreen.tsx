@@ -1,32 +1,40 @@
 import { useState } from 'react';
-import { COMPANIES, RESOURCE_INFO } from '../engine/constants';
+import { COMPANIES, MAX_COMPANY_NAME, RESOURCE_INFO } from '../engine/constants';
 import type { SeatConfig } from '../engine/game';
+import type { RuleOptions } from '../engine/types';
 import { RESOURCES } from '../engine/types';
 import { ResourceIcon } from './icons';
 import { CompanyDot } from './panels';
 import { AboutModal, RulesModal } from './modals';
-import { VOLTA_BRANDING, VoltaWordmark } from './brand';
+import { PUBLIC_DISCLAIMER, VOLTA_BRANDING, VoltaWordmark } from './brand';
 import { SHOW_QUICK_DEMO } from './flags';
+import type { RulesChoice } from './companies';
+import { HUMAN_COMPANY, cleanCompanyName, nameKey, profileOf, rulesFor } from './companies';
+import { RulesPicker, TitleBackdrop } from './NewGameScreen';
 
 export interface CustomOptions {
   seats: SeatConfig[];
   quickStart: boolean;
   seed?: number;
   voltaCards?: boolean;
+  rules: RuleOptions;
 }
 
 type SeatMode = 'human' | 'ai' | 'off';
 
 export function TitleScreen({
   hasSave,
+  lastName,
+  onNewGame,
   onDemo,
-  onQuickStart,
   onContinue,
   onCustom,
 }: {
   hasSave: boolean;
+  /** The player's last company name, prefilled for the first human seat of a custom game. */
+  lastName: string | null;
+  onNewGame: () => void;
   onDemo: () => void;
-  onQuickStart: () => void;
   onContinue: () => void;
   onCustom: (o: CustomOptions) => void;
 }) {
@@ -34,24 +42,22 @@ export function TitleScreen({
   const [rules, setRules] = useState(false);
   const [about, setAbout] = useState(false);
   const [seatModes, setSeatModes] = useState<SeatMode[]>(['human', 'ai', 'ai', 'ai']);
+  const [seatNames, setSeatNames] = useState<string[]>(() => COMPANIES.map((_, i) => (i === 0 ? (lastName ?? '') : '')));
   const [quickStart, setQuickStart] = useState(true);
   const [seedText, setSeedText] = useState('');
   const [voltaCards, setVoltaCards] = useState(false);
+  const [rulesChoice, setRulesChoice] = useState<RulesChoice>('compute');
 
-  const active = seatModes.filter((m) => m !== 'off').length;
-  const customProblem = active < 2 ? 'Pick at least 2 companies.' : null;
+  // Humans may rename their company; computer seats keep the company name.
+  const seatName = (i: number) => (seatModes[i] === 'human' ? cleanCompanyName(seatNames[i], COMPANIES[i].name) : COMPANIES[i].name);
+  const activeSeats = COMPANIES.map((_, i) => i).filter((i) => seatModes[i] !== 'off');
+  const names = activeSeats.map((i) => nameKey(seatName(i)));
+  const customProblem =
+    activeSeats.length < 2 ? 'Pick at least 2 companies.' : new Set(names).size < names.length ? 'Each company needs a different name.' : null;
 
   return (
     <div className="title">
-      <div className="title-bg" aria-hidden="true">
-        {Array.from({ length: 14 }).map((_, i) => (
-          <span
-            key={i}
-            className="title-hex"
-            style={{ ['--i' as string]: i, left: `${(i * 37 + 5) % 100}%`, top: `${(i * 53 + 8) % 92}%`, transform: `scale(${0.5 + ((i * 7) % 5) * 0.2})` }}
-          />
-        ))}
-      </div>
+      <TitleBackdrop />
       <div className="title-card">
         {VOLTA_BRANDING ? (
           <p className="spec-line" aria-hidden="true">
@@ -64,11 +70,17 @@ export function TitleScreen({
           SETTLERS <em>of</em> COMPUTE
         </h1>
         <p className="tagline">The race to build the AI economy.</p>
-        {VOLTA_BRANDING && (
+        {VOLTA_BRANDING ? (
           <p className="presented-by">
             <span className="presented-rule" aria-hidden="true" />
             <span className="presented-label">Brought to you by</span>
             <VoltaWordmark size={22} />
+            <span className="presented-rule" aria-hidden="true" />
+          </p>
+        ) : (
+          <p className="concept-line">
+            <span className="presented-rule" aria-hidden="true" />
+            <span className="concept-label">A concept for Volta</span>
             <span className="presented-rule" aria-hidden="true" />
           </p>
         )}
@@ -87,7 +99,7 @@ export function TitleScreen({
 
         {!custom ? (
           <div className="title-actions">
-            <button className="btn primary big" onClick={onQuickStart}>
+            <button className="btn primary big" onClick={onNewGame}>
               ▶ New Game <span className="btn-sub">Found your AI company · You vs. 3 AI rivals</span>
             </button>
             {SHOW_QUICK_DEMO && (
@@ -115,14 +127,16 @@ export function TitleScreen({
         ) : (
           <div className="custom">
             <h2>Custom game</h2>
-            <p className="muted small">Mix humans (pass-and-play on one device) and AI companies, 2–4 total.</p>
+            <p className="muted small">Mix humans (pass-and-play on one device) and AI companies, 2–4 total. Humans can name their company.</p>
             <div className="seats">
               {COMPANIES.map((c, i) => (
-                <div key={c.id} className="seat">
+                <div key={c.id} className={`seat${seatModes[i] === 'human' ? ' human' : ''}`} style={{ ['--co' as string]: c.color }}>
                   <CompanyDot companyId={c.id} size={14} />
                   <div className="seat-name">
                     <strong>{c.name}</strong>
-                    <span className="small muted">{c.sector}</span>
+                    <span className="small muted">
+                      {c.sector} · {profileOf(c.id).strategy}
+                    </span>
                   </div>
                   <div className="seg" role="radiogroup" aria-label={`${c.name} seat`}>
                     {(['human', 'ai', 'off'] as SeatMode[]).map((m) => (
@@ -137,15 +151,35 @@ export function TitleScreen({
                       </button>
                     ))}
                   </div>
+                  {seatModes[i] === 'human' && (
+                    <label className="seat-rename">
+                      <span className="small muted">Company name</span>
+                      <input
+                        type="text"
+                        className="name-input small-input"
+                        value={seatNames[i]}
+                        maxLength={MAX_COMPANY_NAME}
+                        placeholder={c.name}
+                        autoComplete="off"
+                        spellCheck={false}
+                        aria-label={`Name for the ${c.name} seat`}
+                        onChange={(e) => setSeatNames((s) => s.map((x, j) => (j === i ? e.target.value : x)))}
+                      />
+                    </label>
+                  )}
                 </div>
               ))}
+            </div>
+            <div className="custom-rules">
+              <span className="small muted">Rules</span>
+              <RulesPicker value={rulesChoice} onChange={setRulesChoice} name="custom-rules" />
             </div>
             <div className="custom-opts">
               <label>
                 <input type="checkbox" checked={quickStart} onChange={(e) => setQuickStart(e.target.checked)} /> Quick Start opening (uncheck for a manual snake draft)
               </label>
               <label>
-                <input type="checkbox" checked={voltaCards} onChange={(e) => setVoltaCards(e.target.checked)} /> Special cards (beta): add 2 × Full-Stack Integration to the Innovation deck
+                <input type="checkbox" checked={voltaCards} onChange={(e) => setVoltaCards(e.target.checked)} /> Special cards (beta): add 2 × Expedited Deployment to the Innovation deck
               </label>
               <label>
                 Board seed{' '}
@@ -169,12 +203,15 @@ export function TitleScreen({
                 disabled={!!customProblem}
                 onClick={() =>
                   onCustom({
-                    seats: COMPANIES.map((c, i) => ({ companyId: c.id, mode: seatModes[i] }))
-                      .filter((x) => x.mode !== 'off')
-                      .map((x) => ({ companyId: x.companyId, isAI: x.mode === 'ai' })),
+                    seats: activeSeats.map((i) => ({
+                      companyId: COMPANIES[i].id,
+                      isAI: seatModes[i] === 'ai',
+                      ...(seatModes[i] === 'human' ? { name: seatName(i) } : {}),
+                    })),
                     quickStart,
                     seed: seedText ? Number(seedText) : undefined,
                     voltaCards,
+                    rules: rulesFor(rulesChoice),
                   })
                 }
               >
@@ -190,7 +227,9 @@ export function TitleScreen({
               <CompanyDot companyId={c.id} size={12} />
               <div>
                 <strong>{c.name}</strong>
-                <span className="small muted">{c.sector}</span>
+                <span className="small muted">
+                  {c.sector} · <span className="co-role">{c.id === HUMAN_COMPANY.id ? 'You' : profileOf(c.id).strategy}</span>
+                </span>
                 <span className="tiny muted">{c.tagline}</span>
               </div>
             </div>
@@ -200,7 +239,7 @@ export function TitleScreen({
         <p className="disclaimer">
           {VOLTA_BRANDING
             ? 'Concept build: Volta branding is shown for review and is not approved for public release. Catan-inspired; not affiliated with Catan rights holders. Company names in the game are fictional.'
-            : 'Independent, unofficial, Catan-inspired creative prototype. Not affiliated with, sponsored or endorsed by Volta or Catan rights holders. All company names are fictional.'}
+            : PUBLIC_DISCLAIMER}
         </p>
       </div>
       {rules && <RulesModal onClose={() => setRules(false)} />}

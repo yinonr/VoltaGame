@@ -34,6 +34,8 @@ import { scoreBreakdown } from '../engine/scoring';
 import { RESOURCES } from '../engine/types';
 import { SHOW_QUICK_DEMO } from './flags';
 import type { GameController } from './useGame';
+import { LeaderMark, YouTag } from './panels';
+import { leaderOf, profileOf, shortName } from './companies';
 
 interface Props {
   ctl: GameController;
@@ -80,7 +82,7 @@ function instruction(state: GameState, viewer: number | null, mode: Mode | null)
       if (mode === 'road') return 'Click a glowing edge to build a Network Connection.';
       if (mode === 'cluster') return 'Click a glowing corner to build a Compute Cluster.';
       if (mode === 'factory') return 'Click one of your clusters to upgrade it to an AI Factory.';
-      if (mode === 'integration') return 'Full-Stack Integration: click an open site on your network to deploy an AI Factory.';
+      if (mode === 'integration') return 'Expedited Deployment: click an open site on your network to deploy an AI Factory.';
       return 'Trade and build, then end your turn.';
     default:
       return '';
@@ -233,6 +235,11 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
 
   const viewerPlayer = viewer !== null ? state.players[viewer] : null;
   const viewerCompany = viewerPlayer ? companyById(viewerPlayer.companyId) : null;
+  // Identity: who leads, and whose move the banner is waiting on (colored when it is not yours).
+  const leader = leaderOf(state);
+  const bannerCo = acting !== null && acting !== viewer && state.phase !== 'gameOver' ? companyById(state.players[acting].companyId) : null;
+  const bannerStyle = bannerCo ? { ['--co' as string]: bannerCo.color } : undefined;
+  const currentCo = companyById(state.players[state.currentPlayer].companyId);
   const actingName = acting !== null ? state.players[acting].name : '';
   const round = Math.max(1, Math.ceil(state.turn / state.players.length));
   const myGains = viewer !== null && state.lastProduction ? state.lastProduction.gains[viewer] : null;
@@ -308,7 +315,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
       )}
       {tradeOpen && viewer !== null && <TradeModal state={state} player={viewer} dispatch={dispatch} onClose={() => setTradeOpen(false)} />}
       {rulesOpen && <RulesModal onClose={() => setRulesOpen(false)} />}
-      {intro && <IntroModal demo={intro === 'demo'} onStart={onDismissIntro} />}
+      {intro && <IntroModal demo={intro === 'demo'} state={state} viewer={viewer} onStart={onDismissIntro} />}
       {state.phase === 'gameOver' && !winnerDismissed && (
         <WinnerModal state={state} viewer={humans.length === 1 ? humans[0] : viewer} onNewGame={onNewGame} onDemo={onDemo} onTitle={onExit} onClose={() => setWinnerDismissed(true)} />
       )}
@@ -336,20 +343,25 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
             {state.players.map((p) => {
               const c = companyById(p.companyId);
               const sb = scoreBreakdown(state, p.id);
-              const cp = viewer === p.id || state.phase === 'gameOver' ? sb.total : sb.publicTotal;
+              const me = viewer === p.id;
+              const cp = me || state.phase === 'gameOver' ? sb.total : sb.publicTotal;
               const isTurn = state.currentPlayer === p.id && state.phase !== 'gameOver';
               return (
                 <button
                   key={p.id}
-                  className={`m-chip${isTurn ? ' active' : ''}${viewer === p.id ? ' me' : ''}`}
+                  className={`m-chip${isTurn ? ' active' : ''}${me ? ' me' : ''}${leader === p.id ? ' leader' : ''}`}
                   style={{ ['--co' as string]: c.color }}
                   onClick={() => setSheet('market')}
-                  aria-label={`${p.name}: ${cp} Compute Points${isTurn ? ', taking a turn' : ''}`}
+                  aria-label={`${p.name}${me ? ' (you)' : ''}: ${cp} Compute Points${leader === p.id ? ', leading' : ''}${isTurn ? ', taking a turn' : ''}`}
                 >
                   <span className="m-chip-name">
-                    <CompanyDot companyId={p.companyId} size={8} /> {viewer === p.id ? 'You' : c.short}
+                    <CompanyDot companyId={p.companyId} size={8} /> <span className="m-chip-label">{me ? p.name : shortName(p)}</span>
                   </span>
-                  <b>{cp}</b>
+                  <span className="m-chip-score">
+                    <b>{cp}</b>
+                    {me && <YouTag mini />}
+                    {leader === p.id && <LeaderMark size={11} />}
+                  </span>
                 </button>
               );
             })}
@@ -359,8 +371,15 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
           </button>
         </header>
 
-        <div className={`m-banner${myAction ? ' mine' : ''}${state.phase === 'moveDisruption' || state.phase === 'discard' ? ' alert' : ''}`} role="status">
-          <span>{instruction(state, viewer, mode).replace('Click', 'Tap').replace('click', 'tap')}</span>
+        <div
+          className={`m-banner${myAction ? ' mine' : ''}${bannerCo ? ' rival-turn' : ''}${state.phase === 'moveDisruption' || state.phase === 'discard' ? ' alert' : ''}`}
+          style={bannerStyle}
+          role="status"
+        >
+          <span>
+            {bannerCo && <CompanyDot companyId={bannerCo.id} size={9} />}
+            {instruction(state, viewer, mode).replace('Click', 'Tap').replace('click', 'tap')}
+          </span>
           {mode && myAction && state.phase === 'main' && (
             <button className="btn small" onClick={() => setMode(null)}>
               Cancel
@@ -527,12 +546,20 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
           </span>
         </div>
         <div className="topbar-mid">
+          {viewerPlayer && viewerCompany && (
+            <span className="chip you-chip" style={{ ['--co' as string]: viewerCompany.color }} title={`You are ${viewerPlayer.name} (${profileOf(viewerCompany.id).colorName} pieces)`}>
+              <YouTag mini />
+              <CompanyDot companyId={viewerPlayer.companyId} />
+              <span className="you-chip-name">{viewerPlayer.name}</span>
+            </span>
+          )}
           {state.scenario && <span className="chip scenario">{state.scenario}</span>}
           <span className="chip">{state.phase === 'setup' ? 'Opening draft' : `Round ${round} · Turn ${state.turn}`}</span>
           {acting !== null && (
-            <span className="chip turn-chip">
-              <CompanyDot companyId={state.players[state.currentPlayer].companyId} />
-              {state.players[state.currentPlayer].name}
+            <span className={`chip turn-chip${state.currentPlayer === viewer ? ' mine' : ''}`} style={{ ['--co' as string]: currentCo.color }}>
+              <span className="turn-chip-label">Now</span>
+              <CompanyDot companyId={currentCo.id} />
+              <span className="turn-chip-name">{state.currentPlayer === viewer ? 'Your turn' : state.players[state.currentPlayer].name}</span>
             </span>
           )}
         </div>
@@ -558,7 +585,12 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
       </aside>
 
       <main className="col center">
-        <div className={`banner${myAction ? ' mine' : ''}${state.phase === 'moveDisruption' || state.phase === 'discard' ? ' alert' : ''}`} role="status">
+        <div
+          className={`banner${myAction ? ' mine' : ''}${bannerCo ? ' rival-turn' : ''}${state.phase === 'moveDisruption' || state.phase === 'discard' ? ' alert' : ''}`}
+          style={bannerStyle}
+          role="status"
+        >
+          {bannerCo && <CompanyDot companyId={bannerCo.id} size={10} />}
           {instruction(state, viewer, mode)}
         </div>
         {boardEl}

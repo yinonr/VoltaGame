@@ -9,6 +9,9 @@ import type { DevCardType, GameState, LogEntry } from '../engine/types';
 import { RESOURCES } from '../engine/types';
 import { ClusterShape, FactoryShape } from './Board';
 import { DieFace, ResourceChip, ResourceIcon } from './icons';
+import { financedVertices } from '../engine/financing';
+import { hasFullStack } from '../engine/fullstack';
+import { leaderOf, profileOf } from './companies';
 
 function PieceGlyph({ kind, color, stroke }: { kind: 'cluster' | 'factory'; color: string; stroke: string }) {
   return (
@@ -27,8 +30,29 @@ export function CompanyDot({ companyId, size = 10 }: { companyId: string; size?:
 // Scoreboard
 // ---------------------------------------------------------------------------
 
+/** Marks the company the person at the screen controls (follows the viewer in pass-and-play). */
+export function YouTag({ mini = false }: { mini?: boolean }) {
+  return (
+    <span className={`you-tag${mini ? ' mini' : ''}`} title="Your company">
+      YOU
+    </span>
+  );
+}
+
+/** Crown for the company strictly ahead on public Compute Points (none on a tie). */
+export function LeaderMark({ size = 13 }: { size?: number }) {
+  return (
+    <svg className="leader-mark" width={size} height={size} viewBox="0 0 16 16" role="img" aria-label="Leader">
+      <title>Leader: most public Compute Points</title>
+      <path d="M2 12.2 1 4.6l4 3L8 2.4l3 5.2 4-3-1 7.6Z" fill="currentColor" />
+      <rect x="2" y="13.3" width="12" height="1.7" rx="0.85" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function Scoreboard({ state, viewer }: { state: GameState; viewer: number | null }) {
   const acting = getActingPlayer(state);
+  const leader = leaderOf(state);
   return (
     <section className="panel scoreboard" aria-label="Companies">
       <header className="panel-head">
@@ -44,18 +68,46 @@ export function Scoreboard({ state, viewer }: { state: GameState; viewer: number
         const thinking = acting === p.id && p.isAI && state.phase !== 'gameOver';
         const cards = sumBundle(p.resources);
         const left = piecesLeft(state, p.id);
+        const leveraged = financedVertices(state, p.id).length;
         return (
-          <article key={p.id} className={`company${isTurn ? ' active' : ''}${isViewer ? ' viewer' : ''}${state.winner === p.id ? ' winner' : ''}`} style={{ ['--co' as string]: c.color }}>
+          <article
+            key={p.id}
+            className={`company${isTurn ? ' active' : ''}${isViewer ? ' viewer' : ''}${state.winner === p.id ? ' winner' : ''}${leader === p.id ? ' leader' : ''}`}
+            style={{ ['--co' as string]: c.color }}
+            aria-current={isTurn ? 'step' : undefined}
+          >
             <div className="company-top">
               <CompanyDot companyId={p.companyId} size={14} />
               <div className="company-name">
-                <strong>{p.name}</strong>
-                <span className="muted small">
-                  {c.sector}
-                  {p.isAI ? ' · AI' : isViewer ? ' · You' : ' · Human'}
+                <span className="company-title">
+                  <strong title={p.name}>{p.name}</strong>
+                  {isViewer && <YouTag />}
+                </span>
+                <span className="muted small company-sub">
+                  {isViewer ? (
+                    <>
+                      <span className="your-color">
+                        <i aria-hidden="true" />
+                        Your color
+                      </span>{' '}
+                      · {c.sector}
+                    </>
+                  ) : (
+                    <>
+                      {c.sector} ·{' '}
+                      {p.isAI ? (
+                        <span className="strategy-tag" title={profileOf(c.id).plan}>
+                          {profileOf(c.id).strategy}
+                        </span>
+                      ) : (
+                        'Human'
+                      )}
+                    </>
+                  )}
                 </span>
               </div>
               <div className="vp" title={isViewer && sb.breakthroughs ? `Includes ${sb.breakthroughs} secret AI Breakthrough point(s)` : 'Public Compute Points'}>
+                {leader === p.id && <LeaderMark />}
                 <b>{shown}</b>
                 <span>CP</span>
               </div>
@@ -82,10 +134,24 @@ export function Scoreboard({ state, viewer }: { state: GameState; viewer: number
               </span>
             </div>
             <div className="badges">
+              {thinking && (
+                <span className="badge thinking">
+                  {state.pendingTrade?.to === p.id ? 'Considering offer…' : !isTurn && state.phase === 'discard' ? 'Discarding…' : 'Taking its turn…'}
+                </span>
+              )}
+              {isTurn && !thinking && !p.isAI && <span className="badge turn">{isViewer ? 'Your turn' : 'Their turn'}</span>}
               {state.longestRoadHolder === p.id && <span className="badge">Longest Network +2</span>}
               {state.largestArmyHolder === p.id && <span className="badge">Priority Access +2</span>}
-              {thinking && <span className="badge thinking">{state.pendingTrade?.to === p.id ? 'Considering offer…' : 'Thinking…'}</span>}
-              {isTurn && !thinking && !p.isAI && <span className="badge turn">{isViewer ? 'Your turn' : 'Their turn'}</span>}
+              {hasFullStack(state, p.id) && (
+                <span className="badge fullstack" title="Full-Stack Integration unlocked: can deploy AI Factories directly onto open network sites">
+                  Full-Stack
+                </span>
+              )}
+              {leveraged > 0 && (
+                <span className="badge leveraged" title="Financed AI Factories still paying back their commitment (1 CP each until delivered)">
+                  Leveraged ×{leveraged}
+                </span>
+              )}
             </div>
           </article>
         );
