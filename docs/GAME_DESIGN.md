@@ -156,6 +156,14 @@ The **touch layout** applies when `(max-width: 820px), (max-height: 520px)` matc
 
 The **desktop layout** (three columns) is unchanged.
 
+## Volta special cards and staged branding (feature branch)
+
+- **Special cards:** an opt-in game option (`voltaCards`) shuffles Volta special cards into the Innovation deck. With it off, which is the default, the 25-card deck, and therefore the Quick Demo and AI test seeds, are unchanged.
+  - **Full-Stack Integration** is implemented: an AI Factory goes straight onto a new network site for 1 Land + 3 Capital + 2 GPUs (+2 CP).
+  - **Infrastructure Financing** is specified: an upgrade for 2 GPUs, financed by the factory's next 3 bonus units, with its extra CP deferred until delivered. It is not implemented yet.
+  - Full rules, balance notes and implementation steps are in `docs/VOLTA_SPECIAL_CARDS.md`.
+- **Branding:** co-branding ("Brought to you by Volta", a victory-screen closing line, restrained industrial UI details) is gated by `VOLTA_BRANDING` in `src/ui/brand.tsx`. It is on in development and off in production builds unless `VITE_VOLTA_BRANDING=on`, so public builds never show an unapproved attribution.
+
 ## Deliberate abstractions
 
 - No finance, power engineering, rack layout, cooling or project-finance mechanics. Those were explicitly out of scope.

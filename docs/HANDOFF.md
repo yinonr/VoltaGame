@@ -1,6 +1,48 @@
 # Handoff — Settlers of Compute
 
-_Last updated: 2026-10-11, end of session 1 (including the mobile + deployment continuation)._
+_Last updated: 2026-10-11, end of session 1 (the mobile + deployment continuation, then the Volta branding + special-cards work on a feature branch)._
+
+## ⚠️ Two branches: read this first
+
+| Branch | Commit | What it is | Deployed? |
+| --- | --- | --- | --- |
+| `main` (= `claude/new-session-4osyq1`) | `37c229b` | The stable interview build: V1 game, mobile layout, Quick Demo | **Yes**, live at https://yinonr.github.io/VoltaGame/ |
+| **`claude/volta-branding`** | see `git log -1 origin/claude/volta-branding` | Staged Volta co-branding, the Full-Stack Integration card, and the Volta cards spec | **No.** Do **not** merge into `main` or deploy without the owner's approval. |
+
+### Feature-branch work (`claude/volta-branding`)
+
+- **Staged Volta branding: done and tested, not public.**
+  - *Title screen:* "Brought to you by VOLTA" under the title, between hairline rules, plus a spec-sheet micro-label line. The tagline is now "The race to build the AI economy."
+  - *Victory screen:* a closing band with "The next generation of AI runs on infrastructure." and "Brought to you by VOLTA". It shows an optional "Visit Volta →" link only when `VITE_VOLTA_URL` is set; no URL is hard-coded, because the official address couldn't be verified from this environment.
+  - *Elsewhere:* subtle industrial details (corner registration marks, monospace panel labels, a hairline board plate) under `html.brand-volta`. No pop-ups and no in-turn mentions.
+  - *Gate:* `src/ui/brand.tsx`. Branding is **on in `npm run dev`** and **off in production builds** unless `VITE_VOLTA_BRANDING=on`. Even if this branch were merged, the public build would show no attribution until that variable is set in the deploy workflow.
+  - *Wordmark:* "VOLTA" is a **typographic placeholder**. Replace it with the official SVG logo once Volta approves (one component, `VoltaWordmark`).
+  - *Disclaimer:* the branded title screen says "Concept build: Volta branding is shown for review and is not approved for public release."
+  - *Tested:* Playwright at 1440×900 and 390×844, branded and unbranded. The branded build shows the treatments; the unbranded production build shows none. Winner screen and title both checked. No errors.
+- **Full-Stack Integration card: done and tested** (opt-in, Custom game → "Special cards (beta)").
+  - It deploys an AI Factory straight onto a new network site for 1 Land + 3 Capital + 2 GPUs, worth +2 CP.
+  - It has engine logic, AI play logic, desktop and mobile UI (placement mode plus confirm on phones), and flavor text.
+  - 8 new tests: **61 passing in total**. Browser-checked on desktop and at 390×844.
+  - The default deck is unchanged (25 cards), so the Quick Demo, AI seeds and all earlier tests behave exactly as before. The mobile regression suite was re-run on this branch and passed.
+- **Infrastructure Financing card: designed, NOT implemented.** The full spec, exploit review and step-by-step implementation plan are in `docs/VOLTA_SPECIAL_CARDS.md`.
+
+### How to view the branded build locally
+
+```bash
+git checkout claude/volta-branding && npm install
+npm run dev                                   # branding on by default in dev
+VITE_VOLTA_BRANDING=on npm run build && npm run preview   # branded production build
+VITE_VOLTA_URL=https://<confirmed-volta-site> npm run dev  # also shows the "Visit Volta →" link
+```
+
+### First task for the next session
+
+Decide what the next session is for: online multiplayer, or Infrastructure Financing.
+
+- **If multiplayer:** branch from `main`, not from `claude/volta-branding`, unless the owner approves the branding. Leave the branding branch alone.
+- **If Infrastructure Financing:** work on `claude/volta-branding` and follow the "Implementation steps for the next session" in `docs/VOLTA_SPECIAL_CARDS.md` in order. Start with the engine and tests (steps 1–6, plus the step-9 tests) before any UI.
+
+Before publishing any Volta branding: get approval for the sponsorship language, swap in the official logo, set `VITE_VOLTA_URL`, and add `VITE_VOLTA_BRANDING=on` to the build step in `.github/workflows/deploy.yml`.
 
 ## Where things are
 
