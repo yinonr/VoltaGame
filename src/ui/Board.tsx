@@ -448,7 +448,7 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
                         {short ? '✕' : `+${n}`}
                       </text>
                       {delivered && !short && (
-                        <text x={0} y={21} textAnchor="middle" className="payout-repaid">
+                        <text x={0} y={-17} textAnchor="middle" className="payout-repaid">
                           +1 repaid
                         </text>
                       )}
