@@ -1,0 +1,478 @@
+import { writeFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { decideAIAction } from '../ai';
+import { COMPANIES, INTEGRATED_DEPLOYMENT_COST, addBundle, bundle, hasBundle, missingFor, sumBundle } from '../constants';
+import { vertexValue } from '../evaluation';
+import { isFinanced } from '../financing';
+import {
+  FULLSTACK_MIN_FACTORIES,
+  FULLSTACK_MIN_NETWORK,
+  FULLSTACK_MIN_RESOURCE_TYPES,
+  FULLSTACK_MIN_SITES,
+  checkIntegratedDeployment,
+  hasFullStack,
+  largestConnectedNetwork,
+  legalIntegratedVertices,
+  touchedResourceTypes,
+} from '../fullstack';
+import type { MilestoneId } from '../fullstack';
+import { applyAction, createGame, getActingPlayer } from '../game';
+import { bankRate, checkBankTrade, legalClusterVertices, piecesLeft } from '../rules';
+import { victoryPoints } from '../scoring';
+import type { Action, GameState, ResourceBundle } from '../types';
+import { RESOURCES } from '../types';
+import { ALL_AI, conservation } from './helpers';
+
+// Full-Stack calibration (dev tool, skipped by default). Results: docs/FULLSTACK_CALIBRATION.md.
+//   SIM_FULLSTACK=1 npx vitest run src/engine/__tests__/fullstack-calibration.test.ts
+// Optional: SIM_FULLSTACK_GAMES=<n> (default 200, seeds 7000…), SIM_FULLSTACK_OUT=<file.json>,
+// SIM_FULLSTACK_EXPERIMENTS=0 to run only the milestone study.
+//
+// 1. Milestone study: all-AI games with { fullStack: true }. Today's AI neither pursues the
+//    milestones nor uses Integrated Deployment, so this measures how naturally companies get there.
+//    Alternative thresholds are evaluated on the same trajectories ("virtual" unlocks).
+// 2. Exploitation study: one company (rotating through all four seats) uses Integrated Deployment
+//    whenever it can, compared with the same seat on the same seed when nobody uses it. A higher
+//    cost is simulated by moving the extra resources from the deployer's hand to the market right
+//    after the deployment (conservation still holds), so constants.ts stays untouched.
+
+const MILESTONES: MilestoneId[] = ['factory', 'sites', 'resources', 'network'];
+
+interface Thresholds {
+  name: string;
+  factories: number;
+  sites: number;
+  types: number;
+  network: number;
+}
+
+const ENGINE: Thresholds = {
+  name: `engine (${FULLSTACK_MIN_FACTORIES}F/${FULLSTACK_MIN_SITES}S/${FULLSTACK_MIN_RESOURCE_TYPES}R/${FULLSTACK_MIN_NETWORK}N)`,
+  factories: FULLSTACK_MIN_FACTORIES,
+  sites: FULLSTACK_MIN_SITES,
+  types: FULLSTACK_MIN_RESOURCE_TYPES,
+  network: FULLSTACK_MIN_NETWORK,
+};
+
+const VARIANTS: Thresholds[] = [
+  ENGINE,
+  { name: '1F/3S/4R/3N', factories: 1, sites: 3, types: 4, network: 3 },
+  { name: '1F/3S/4R/5N', factories: 1, sites: 3, types: 4, network: 5 },
+  { name: '1F/4S/4R/4N', factories: 1, sites: 4, types: 4, network: 4 },
+  { name: '1F/3S/5R/4N', factories: 1, sites: 3, types: 5, network: 4 },
+  { name: '1F/4S/4R/5N', factories: 1, sites: 4, types: 4, network: 5 },
+  { name: '1F/3S/3R/4N', factories: 1, sites: 3, types: 3, network: 4 },
+];
+
+interface Measure {
+  operational: number;
+  sites: number;
+  types: number;
+  network: number;
+}
+
+function measure(s: GameState, p: number): Measure {
+  let operational = 0;
+  let sites = 0;
+  for (const b of s.buildings) {
+    if (!b || b.owner !== p) continue;
+    sites++;
+    if (b.kind === 'factory' && !isFinanced(b)) operational++;
+  }
+  return { operational, sites, types: touchedResourceTypes(s, p).length, network: largestConnectedNetwork(s, p) };
+}
+
+function flags(m: Measure, t: Thresholds): Record<MilestoneId, boolean> {
+  return { factory: m.operational >= t.factories, sites: m.sites >= t.sites, resources: m.types >= t.types, network: m.network >= t.network };
+}
+
+const allOf = (f: Record<MilestoneId, boolean>) => MILESTONES.every((id) => f[id]);
+
+const LEVELS: { key: string; metric: keyof Measure; at: number }[] = [
+  ...[1, 2].map((at) => ({ key: `F${at}`, metric: 'operational' as const, at })),
+  ...[3, 4, 5].map((at) => ({ key: `S${at}`, metric: 'sites' as const, at })),
+  ...[3, 4, 5].map((at) => ({ key: `R${at}`, metric: 'types' as const, at })),
+  ...[3, 4, 5, 6].map((at) => ({ key: `N${at}`, metric: 'network' as const, at })),
+];
+
+function roundOf(s: GameState): number {
+  return Math.floor((Math.max(1, s.turn) - 1) / s.players.length) + 1;
+}
+
+interface Unlock {
+  turn: number;
+  round: number;
+  cp: number;
+  publicCp: number;
+  /** Milestones that turned true on the unlocking action (the binding constraint). */
+  binding: MilestoneId[];
+}
+
+interface CompanyRecord {
+  seed: number;
+  seat: number;
+  company: string;
+  firstRound: Record<MilestoneId, number | null>;
+  /** First round each metric level was reached (e.g. "N5" = 5 connected connections). */
+  levels: Record<string, number | null>;
+  /** Unlock per threshold variant (index-aligned with VARIANTS); [0] is the engine's own. */
+  unlocks: (Unlock | null)[];
+  engineUnlockTurn: number | null;
+  missingAtEnd: MilestoneId[];
+  finalCp: number;
+  won: boolean;
+  /** Own turns after the unlock; of those, with a site + factory piece; and with the cost in hand too. */
+  postTurns: number;
+  postTurnsWithSite: number;
+  postTurnsAffordable: number;
+  deployments: number;
+}
+
+interface GameRecord {
+  seed: number;
+  rounds: number;
+  finished: boolean;
+  winner: number | null;
+  companies: CompanyRecord[];
+}
+
+/**
+ * How an exploiting company treats Integrated Deployment once unlocked:
+ * - greedy: deploys whenever the cost happens to be in hand (otherwise plays the normal AI);
+ * - focused: greedy + bank/port trades toward the cost when 1–2 resources short;
+ * - committed: focused (up to 3 short) + saves for it: skips AI Factory upgrades and Innovation
+ *   Cards when 2 or fewer resources short, and new clusters when 1 short (an upper bound on use).
+ */
+type Policy = 'none' | 'greedy' | 'focused' | 'committed';
+
+interface RunOptions {
+  seed: number;
+  exploiters: number[];
+  policy: Policy;
+  /** Extra resources on top of INTEGRATED_DEPLOYMENT_COST (simulated price change). */
+  extra: ResourceBundle;
+}
+
+function bestDeployVertex(s: GameState, p: number): number {
+  let best = -1;
+  let bestScore = -Infinity;
+  for (const v of legalIntegratedVertices(s, p)) {
+    const score = vertexValue(s, v, p);
+    if (score > bestScore) {
+      bestScore = score;
+      best = v;
+    }
+  }
+  return best;
+}
+
+/** One bank/port trade toward the deployment cost, paid only from resources the cost doesn't need. */
+function tradeTowardDeployment(s: GameState, p: number, cost: ResourceBundle, maxShort: number): Action | null {
+  const have = s.players[p].resources;
+  const missing = missingFor(have, cost);
+  if (sumBundle(missing) === 0 || sumBundle(missing) > maxShort) return null;
+  for (const m of RESOURCES) {
+    if (missing[m] === 0) continue;
+    for (const r of RESOURCES) {
+      if (r === m) continue;
+      const rate = bankRate(s, p, r);
+      if (have[r] - cost[r] >= rate && checkBankTrade(s, p, r, m).ok) return { type: 'BANK_TRADE', give: r, get: m };
+    }
+  }
+  return null;
+}
+
+function decide(s: GameState, actor: number, o: RunOptions, cost: ResourceBundle): Action {
+  if (o.policy !== 'none' && o.exploiters.includes(actor) && actor === s.currentPlayer && s.phase === 'main' && !s.pendingTrade && hasFullStack(s, actor)) {
+    if (checkIntegratedDeployment(s, actor).ok && hasBundle(s.players[actor].resources, cost)) {
+      const vertex = bestDeployVertex(s, actor);
+      if (vertex >= 0) return { type: 'BUILD_INTEGRATED_FACTORY', vertex };
+    }
+    if (o.policy !== 'greedy' && piecesLeft(s, actor).factory > 0 && legalClusterVertices(s, actor).length > 0) {
+      const trade = tradeTowardDeployment(s, actor, cost, o.policy === 'committed' ? 3 : 2);
+      if (trade) return trade;
+      if (o.policy === 'committed') {
+        const a = decideAIAction(s, actor);
+        const short = sumBundle(missingFor(s.players[actor].resources, cost));
+        if (short <= 2 && (a.type === 'BUILD_FACTORY' || a.type === 'BUY_CARD')) return { type: 'END_TURN' };
+        if (short <= 1 && a.type === 'BUILD_CLUSTER') return { type: 'END_TURN' };
+        return a;
+      }
+    }
+  }
+  return decideAIAction(s, actor);
+}
+
+function playGame(o: RunOptions): GameRecord {
+  const cost = addBundle(INTEGRATED_DEPLOYMENT_COST, o.extra);
+  let s = createGame({ seed: o.seed, seats: ALL_AI, rules: { fullStack: true } });
+  const n = s.players.length;
+  const companies: CompanyRecord[] = s.players.map((pl) => ({
+    seed: o.seed,
+    seat: pl.id,
+    company: pl.companyId,
+    firstRound: { factory: null, sites: null, resources: null, network: null },
+    levels: Object.fromEntries(LEVELS.map((l) => [l.key, null])),
+    unlocks: VARIANTS.map(() => null),
+    engineUnlockTurn: null,
+    missingAtEnd: [],
+    finalCp: 0,
+    won: false,
+    postTurns: 0,
+    postTurnsWithSite: 0,
+    postTurnsAffordable: 0,
+    deployments: 0,
+  }));
+  const prevFlags = VARIANTS.map((t) => s.players.map((_, p) => flags(measure(s, p), t)));
+  let steps = 0;
+  let lastRolledTurn = -1;
+  while (s.phase !== 'gameOver' && steps < 6000) {
+    const actor = getActingPlayer(s)!;
+    const a = decide(s, actor, o, cost);
+    s = applyAction(s, a);
+    steps++;
+    if (a.type === 'BUILD_INTEGRATED_FACTORY') {
+      companies[actor].deployments++;
+      if (sumBundle(o.extra) > 0) {
+        // Simulated price change: the extra resources go to the market as well.
+        const resources = { ...s.players[actor].resources };
+        const bank = { ...s.bank };
+        for (const r of RESOURCES) {
+          resources[r] -= o.extra[r];
+          bank[r] += o.extra[r];
+        }
+        s = { ...s, bank, players: s.players.map((pl) => (pl.id === actor ? { ...pl, resources } : pl)) };
+      }
+    }
+    const round = roundOf(s);
+    for (let p = 0; p < n; p++) {
+      const rec = companies[p];
+      const m = measure(s, p);
+      for (const l of LEVELS) if (rec.levels[l.key] === null && m[l.metric] >= l.at) rec.levels[l.key] = round;
+      VARIANTS.forEach((t, i) => {
+        const f = flags(m, t);
+        if (i === 0) for (const id of MILESTONES) if (f[id] && rec.firstRound[id] === null) rec.firstRound[id] = round;
+        if (rec.unlocks[i] === null && allOf(f)) {
+          rec.unlocks[i] = {
+            turn: s.turn,
+            round,
+            cp: victoryPoints(s, p, true),
+            publicCp: victoryPoints(s, p, false),
+            binding: MILESTONES.filter((id) => !prevFlags[i][p][id]),
+          };
+        }
+        prevFlags[i][p] = f;
+      });
+      if (rec.engineUnlockTurn === null && s.players[p].fullStackTurn !== undefined) rec.engineUnlockTurn = s.players[p].fullStackTurn!;
+    }
+    // Opportunity after the unlock: sampled once per own turn, right after the roll is resolved.
+    const cur = s.currentPlayer;
+    if (s.phase === 'main' && lastRolledTurn !== s.turn && hasFullStack(s, cur)) {
+      lastRolledTurn = s.turn;
+      const rec = companies[cur];
+      rec.postTurns++;
+      if (piecesLeft(s, cur).factory > 0 && legalClusterVertices(s, cur).length > 0) {
+        rec.postTurnsWithSite++;
+        if (hasBundle(s.players[cur].resources, cost)) rec.postTurnsAffordable++;
+      }
+    }
+  }
+  expect(conservation(s)).toEqual(bundle({ power: 19, networking: 19, land: 19, capital: 19, gpu: 19 }));
+  for (let p = 0; p < n; p++) {
+    const rec = companies[p];
+    rec.finalCp = victoryPoints(s, p, true);
+    rec.won = s.winner === p;
+    const f = flags(measure(s, p), ENGINE);
+    rec.missingAtEnd = rec.unlocks[0] ? [] : MILESTONES.filter((id) => !f[id]);
+  }
+  return { seed: o.seed, rounds: roundOf(s), finished: s.phase === 'gameOver', winner: s.winner, companies };
+}
+
+// ---------------------------------------------------------------------------
+// Statistics helpers
+// ---------------------------------------------------------------------------
+
+function quantile(xs: number[], q: number): number {
+  if (xs.length === 0) return NaN;
+  const sorted = xs.slice().sort((a, b) => a - b);
+  const pos = (sorted.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}
+
+const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
+const pct = (k: number, total: number) => (total ? `${((100 * k) / total).toFixed(1)}%` : '–');
+const f1 = (x: number) => (Number.isNaN(x) ? '–' : x.toFixed(1));
+const spread = (xs: number[]) => (xs.length ? `${f1(quantile(xs, 0.5))} (${f1(quantile(xs, 0.25))}–${f1(quantile(xs, 0.75))})` : '–');
+
+function companyName(id: string): string {
+  return COMPANIES.find((c) => c.id === id)?.name ?? id;
+}
+
+function milestoneReport(games: GameRecord[]): string {
+  const out: string[] = [];
+  const all = games.flatMap((g) => g.companies);
+  const unlocked = all.filter((c) => c.unlocks[0]);
+  const engineAgrees = all.every((c) => (c.unlocks[0]?.turn ?? null) === c.engineUnlockTurn);
+  out.push(`Games: ${games.length} (seeds ${games[0].seed}–${games[games.length - 1].seed}), finished: ${games.filter((g) => g.finished).length}, company-games: ${all.length}. Engine unlocks match the simulated rule: ${engineAgrees ? 'yes' : 'NO'}.`);
+  out.push(`Game length (rounds): median ${spread(games.map((g) => g.rounds))}, mean ${f1(mean(games.map((g) => g.rounds)))}.`);
+  out.push('');
+  out.push('| Company | Unlock rate | Round of unlock, median (IQR) | CP at unlock, median (IQR) | Rounds left after unlock, median | Final CP, mean | Wins |');
+  out.push('| --- | --- | --- | --- | --- | --- | --- |');
+  const rows = [...COMPANIES.map((c) => c.id), 'all'];
+  for (const id of rows) {
+    const cs = id === 'all' ? all : all.filter((c) => c.company === id);
+    const us = cs.filter((c) => c.unlocks[0]);
+    const left = us.map((c) => games.find((g) => g.seed === c.seed)!.rounds - c.unlocks[0]!.round);
+    out.push(
+      `| ${id === 'all' ? '**All**' : companyName(id)} | ${pct(us.length, cs.length)} (${us.length}/${cs.length}) | ${spread(us.map((c) => c.unlocks[0]!.round))} | ${spread(us.map((c) => c.unlocks[0]!.cp))} | ${f1(quantile(left, 0.5))} | ${f1(mean(cs.map((c) => c.finalCp)))} | ${cs.filter((c) => c.won).length} |`,
+    );
+  }
+  out.push('');
+  const hist = new Map<number, number>();
+  for (const c of unlocked) hist.set(c.unlocks[0]!.cp, (hist.get(c.unlocks[0]!.cp) ?? 0) + 1);
+  out.push(`CP at unlock (hidden CP included), n=${unlocked.length}: ${[...hist.entries()].sort((a, b) => a[0] - b[0]).map(([cp, k]) => `${cp} CP: ${k} (${pct(k, unlocked.length)})`).join(' · ')}`);
+  out.push(`Unlocked at <= 3 CP: ${unlocked.filter((c) => c.unlocks[0]!.cp <= 3).length}; 4–6 CP: ${pct(unlocked.filter((c) => c.unlocks[0]!.cp >= 4 && c.unlocks[0]!.cp <= 6).length, unlocked.length)}; >= 7 CP: ${pct(unlocked.filter((c) => c.unlocks[0]!.cp >= 7).length, unlocked.length)}.`);
+  const winners = all.filter((c) => c.won);
+  out.push(`Winners who had unlocked before winning: ${pct(winners.filter((c) => c.unlocks[0]).length, winners.length)} (${winners.filter((c) => c.unlocks[0]).length}/${winners.length}).`);
+  out.push(`Companies unlocking per game: ${[0, 1, 2, 3, 4].map((k) => `${k}: ${games.filter((g) => g.companies.filter((c) => c.unlocks[0]).length === k).length}`).join(' · ')}`);
+  out.push('');
+  out.push('| Milestone | Reached by game end | First reached, round median (IQR) | Binding (turned true on the unlocking action) | Sole binding | Missing at game end (non-unlockers) |');
+  out.push('| --- | --- | --- | --- | --- | --- |');
+  const locked = all.filter((c) => !c.unlocks[0]);
+  for (const id of MILESTONES) {
+    const reached = all.filter((c) => c.firstRound[id] !== null);
+    const binding = unlocked.filter((c) => c.unlocks[0]!.binding.includes(id)).length;
+    const sole = unlocked.filter((c) => c.unlocks[0]!.binding.length === 1 && c.unlocks[0]!.binding[0] === id).length;
+    out.push(
+      `| ${id} | ${pct(reached.length, all.length)} | ${spread(reached.map((c) => c.firstRound[id]!))} | ${pct(binding, unlocked.length)} (${binding}) | ${pct(sole, unlocked.length)} (${sole}) | ${pct(locked.filter((c) => c.missingAtEnd.includes(id)).length, locked.length)} |`,
+    );
+  }
+  out.push('');
+  const post = unlocked.reduce((n, c) => n + c.postTurns, 0);
+  const site = unlocked.reduce((n, c) => n + c.postTurnsWithSite, 0);
+  const afford = unlocked.reduce((n, c) => n + c.postTurnsAffordable, 0);
+  out.push(`After unlocking (nobody deploying): ${post} own turns; open site + factory piece on ${pct(site, post)}; cost already in hand on top of that on ${pct(afford, post)}. Unlockers with >= 1 such affordable turn: ${pct(unlocked.filter((c) => c.postTurnsAffordable > 0).length, unlocked.length)}.`);
+  out.push('');
+  out.push('Metric levels (F = operational factories, S = sites, R = resource types touched, N = largest connected network):');
+  out.push('');
+  out.push('| Level | Met from round 1 | Reached by game end | First reached, round median (IQR) |');
+  out.push('| --- | --- | --- | --- |');
+  for (const l of LEVELS) {
+    const reached = all.filter((c) => c.levels[l.key] !== null);
+    out.push(`| ${l.key} | ${pct(all.filter((c) => c.levels[l.key] === 1).length, all.length)} | ${pct(reached.length, all.length)} | ${spread(reached.map((c) => c.levels[l.key]!))} |`);
+  }
+  out.push('');
+  out.push('Alternative thresholds on the same trajectories (F = operational factories, S = sites, R = resource types, N = connected network):');
+  out.push('');
+  out.push('| Thresholds | Unlock rate | Round, median (IQR) | CP at unlock, median (IQR) | <= 4 CP | Rounds left, median | Binding: factory / sites / resources / network |');
+  out.push('| --- | --- | --- | --- | --- | --- | --- |');
+  VARIANTS.forEach((t, i) => {
+    const us = all.filter((c) => c.unlocks[i]);
+    const left = us.map((c) => games.find((g) => g.seed === c.seed)!.rounds - c.unlocks[i]!.round);
+    const bind = MILESTONES.map((id) => pct(us.filter((c) => c.unlocks[i]!.binding.includes(id)).length, us.length)).join(' / ');
+    out.push(
+      `| ${t.name} | ${pct(us.length, all.length)} | ${spread(us.map((c) => c.unlocks[i]!.round))} | ${spread(us.map((c) => c.unlocks[i]!.cp))} | ${pct(us.filter((c) => c.unlocks[i]!.cp <= 4).length, us.length)} | ${f1(quantile(left, 0.5))} | ${bind} |`,
+    );
+  });
+  return out.join('\n');
+}
+
+interface Experiment {
+  name: string;
+  policy: Policy;
+  extra: ResourceBundle;
+}
+
+function experimentRow(e: Experiment, base: GameRecord[], runs: GameRecord[][]): string {
+  // runs[k] = games where seat k exploits; compare that seat with the baseline of the same seed.
+  let wins = 0;
+  let baseWins = 0;
+  let deploys = 0;
+  let deployers = 0;
+  let unlockedSeats = 0;
+  let gained = 0;
+  let total = 0;
+  const rounds: number[] = [];
+  const baseRounds: number[] = [];
+  runs.forEach((games, seat) => {
+    games.forEach((g, i) => {
+      const me = g.companies[seat];
+      const b = base[i].companies[seat];
+      total++;
+      if (me.won) wins++;
+      if (b.won) baseWins++;
+      deploys += me.deployments;
+      if (me.deployments > 0) deployers++;
+      if (me.unlocks[0]) unlockedSeats++;
+      gained += me.finalCp - b.finalCp;
+      rounds.push(g.rounds);
+      baseRounds.push(base[i].rounds);
+    });
+  });
+  const se = Math.sqrt((wins / total) * (1 - wins / total) / total);
+  return `| ${e.name} | ${pct(baseWins, total)} | **${pct(wins, total)}** ± ${(100 * se).toFixed(1)} | ${pct(unlockedSeats, total)} | ${pct(deployers, total)} | ${(deploys / total).toFixed(2)} | ${(deploys / Math.max(1, deployers)).toFixed(2)} | ${f1(mean(rounds))} vs ${f1(mean(baseRounds))} | ${(gained / total).toFixed(2)} |`;
+}
+
+const GAMES = Number(process.env.SIM_FULLSTACK_GAMES ?? 200);
+const SEEDS = Array.from({ length: GAMES }, (_, i) => 7000 + i);
+const NONE = bundle();
+
+describe.runIf(process.env.SIM_FULLSTACK)('Full-Stack calibration (simulation)', () => {
+  it('measures milestones, unlocks and Integrated Deployment strength', () => {
+    const t0 = performance.now();
+    const base = SEEDS.map((seed) => playGame({ seed, exploiters: [], policy: 'none', extra: NONE }));
+    const sections: string[] = ['## Milestone study (nobody deploys)', '', milestoneReport(base)];
+    const json: Record<string, unknown> = { base };
+    console.log(`baseline: ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+
+    if (process.env.SIM_FULLSTACK_EXPERIMENTS !== '0') {
+      const experiments: Experiment[] = [
+        { name: 'Greedy, current cost (8: 1P+1L+3C+2G)', policy: 'greedy', extra: NONE },
+        { name: 'Focused (trades toward it), current cost (8)', policy: 'focused', extra: NONE },
+        { name: 'Committed (saves for it), current cost (8)', policy: 'committed', extra: NONE },
+        { name: 'Committed, 9 (+1 Networking = cluster + upgrade)', policy: 'committed', extra: bundle({ networking: 1 }) },
+        { name: 'Committed, 9 (+1 GPU)', policy: 'committed', extra: bundle({ gpu: 1 }) },
+        { name: 'Committed, 10 (+1 Networking +1 GPU)', policy: 'committed', extra: bundle({ networking: 1, gpu: 1 }) },
+      ];
+      const rows: string[] = [];
+      for (const e of experiments) {
+        const t = performance.now();
+        const runs = [0, 1, 2, 3].map((seat) => SEEDS.map((seed) => playGame({ seed, exploiters: [seat], policy: e.policy, extra: e.extra })));
+        rows.push(experimentRow(e, base, runs));
+        json[e.name] = runs.map((games) => games.map((g) => ({ seed: g.seed, rounds: g.rounds, winner: g.winner, companies: g.companies.map((c) => ({ deployments: c.deployments, won: c.won, finalCp: c.finalCp, unlock: c.unlocks[0] })) })));
+        console.log(`${e.name}: ${((performance.now() - t) / 1000).toFixed(1)} s`);
+      }
+      // Everyone deploys: does the race end too fast, and does it favor a seat or a company?
+      const symmetric = (policy: Policy, extra: ResourceBundle, label: string) => {
+        const sym = SEEDS.map((seed) => playGame({ seed, exploiters: [0, 1, 2, 3], policy, extra }));
+        const deploys = sym.flatMap((g) => g.companies.map((c) => c.deployments));
+        const cps = sym.flatMap((g) => g.companies.filter((c) => c.unlocks[0]).map((c) => c.unlocks[0]!.cp));
+        return `| ${label} | ${f1(mean(sym.map((g) => g.rounds)))} vs ${f1(mean(base.map((g) => g.rounds)))} | ${(mean(deploys)).toFixed(2)} | ${pct(sym.flatMap((g) => g.companies).filter((c) => c.deployments > 0).length, deploys.length)} | ${pct(cps.length, deploys.length)} · CP ${spread(cps)} | ${pct(sym.filter((g) => g.companies[g.winner!].deployments > 0).length, sym.length)} | ${[0, 1, 2, 3].map((p) => sym.filter((g) => g.winner === p).length).join('/')} (baseline ${[0, 1, 2, 3].map((p) => base.filter((g) => g.winner === p).length).join('/')}) |`;
+      };
+      const symRows = [
+        symmetric('focused', NONE, 'All focused, current cost (8)'),
+        symmetric('committed', NONE, 'All committed, current cost (8)'),
+        symmetric('committed', bundle({ networking: 1 }), 'All committed, 9 (+1 Networking)'),
+      ];
+      sections.push(
+        '',
+        '## Exploitation study (one seat at a time uses Integrated Deployment; 4 seats × seeds)',
+        '',
+        '| Policy and cost | Seat win rate, nobody deploys | Seat win rate, deploying | Unlocked | Deployed >= 1 | Deployments / game | per deployer | Mean rounds (deploying vs baseline) | Final CP gain vs baseline |',
+        '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+        ...rows,
+        '',
+        '| All four companies deploying | Mean rounds vs baseline | Deployments / company-game | Companies deploying >= 1 | Unlocked · CP at unlock | Winner deployed | Wins by seat |',
+        '| --- | --- | --- | --- | --- | --- | --- |',
+        ...symRows,
+      );
+    }
+    const report = sections.join('\n');
+    console.log(report);
+    if (process.env.SIM_FULLSTACK_OUT) writeFileSync(process.env.SIM_FULLSTACK_OUT, JSON.stringify({ report, ...json }));
+    console.log(`total: ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+    expect(base.every((g) => g.finished)).toBe(true);
+  }, 3_600_000);
+});
