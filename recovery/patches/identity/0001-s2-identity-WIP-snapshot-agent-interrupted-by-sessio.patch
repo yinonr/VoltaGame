@@ -1,0 +1,2068 @@
+From 05eb3b6f93b689de4a2708438bb47755796a56b4 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 11 Oct 2026 05:16:27 +0000
+Subject: [PATCH] s2/identity: WIP snapshot (agent interrupted by session
+ limit; unverified)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01P9tr9NPSVt39359TmWrAhk
+---
+ src/App.tsx                        |  71 +++-
+ src/engine/__tests__/names.test.ts | 306 +++++++++++++++
+ src/ui/GameScreen.tsx              |  58 ++-
+ src/ui/NewGameScreen.tsx           | 218 +++++++++++
+ src/ui/TitleScreen.tsx             |  91 +++--
+ src/ui/brand.tsx                   |   8 +
+ src/ui/companies.ts                | 152 ++++++++
+ src/ui/modals.tsx                  |  50 ++-
+ src/ui/panels.tsx                  |  80 +++-
+ src/ui/styles/identity.css         | 586 +++++++++++++++++++++++++++++
+ src/ui/useGame.ts                  |  19 +-
+ 11 files changed, 1570 insertions(+), 69 deletions(-)
+ create mode 100644 src/engine/__tests__/names.test.ts
+ create mode 100644 src/ui/NewGameScreen.tsx
+ create mode 100644 src/ui/companies.ts
+
+diff --git a/src/App.tsx b/src/App.tsx
+index 41b96ca..352e40c 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -4,17 +4,31 @@ import { createDemoGame } from './engine/demo';
+ import { createGame } from './engine/game';
+ import type { CustomOptions } from './ui/TitleScreen';
+ import { TitleScreen } from './ui/TitleScreen';
++import type { NewGameChoice } from './ui/NewGameScreen';
++import { NewGameScreen } from './ui/NewGameScreen';
+ import { GameScreen } from './ui/GameScreen';
+ import { loadSavedGame, useGame } from './ui/useGame';
++import type { RulesChoice } from './ui/companies';
++import { DEFAULT_COMPANY_NAME, choiceOf, loadLastCompanyName, newGameSeats, rememberCompanyName } from './ui/companies';
+ 
+ // Staged co-branding: enables the restrained Volta design details in styles.css.
+ if (VOLTA_BRANDING) document.documentElement.classList.add('brand-volta');
+ 
++/** How the New Game screen was opened: what it is prefilled with and where Back returns. */
++interface SetupContext {
++  from: 'title' | 'game';
++  name: string;
++  rules: RulesChoice;
++  /** Whether the game was already paused when the player left it for the New Game screen. */
++  wasPaused: boolean;
++}
++
+ export default function App() {
+   const ctl = useGame();
+-  const [screen, setScreen] = useState<'title' | 'game'>('title');
++  const [screen, setScreen] = useState<'title' | 'setup' | 'game'>('title');
+   const [intro, setIntro] = useState<'demo' | 'new' | null>(null);
+   const [hasSave, setHasSave] = useState(() => loadSavedGame() !== null);
++  const [setup, setSetup] = useState<SetupContext | null>(null);
+ 
+   const startDemo = () => {
+     ctl.setPaused(false);
+@@ -22,16 +36,43 @@ export default function App() {
+     setIntro('demo');
+     setScreen('game');
+   };
+-  const startQuick = () => {
++  // Every "New game" (title, in-game menu, results) goes through the setup screen, prefilled
++  // with the last company name and, from a game, that game's rules.
++  const openSetup = (from: SetupContext['from']) => {
++    const cur = ctl.getState();
++    const yours = cur?.players.find((p) => !p.isAI)?.name;
++    setSetup({
++      from,
++      name: loadLastCompanyName() ?? yours ?? DEFAULT_COMPANY_NAME,
++      rules: from === 'game' && cur ? choiceOf(cur.rules) : 'compute',
++      wasPaused: ctl.paused,
++    });
++    if (from === 'game') ctl.setPaused(true);
++    setScreen('setup');
++  };
++  const startNew = (o: NewGameChoice) => {
++    rememberCompanyName(o.name);
+     ctl.setPaused(false);
+-    ctl.setState(createGame({}));
+-    setIntro(null);
++    ctl.setState(createGame({ seats: newGameSeats(o.name), rules: o.rules }));
++    setIntro('new');
+     setScreen('game');
+   };
++  const leaveSetup = () => {
++    if (setup?.from === 'game' && ctl.getState()) {
++      ctl.setPaused(setup.wasPaused);
++      setScreen('game');
++      return;
++    }
++    setHasSave(loadSavedGame() !== null);
++    setScreen('title');
++  };
+   const startCustom = (o: CustomOptions) => {
++    const humans = o.seats.filter((s) => !s.isAI);
++    if (humans[0]?.name) rememberCompanyName(humans[0].name);
+     ctl.setPaused(false);
+-    ctl.setState(createGame({ seats: o.seats, quickStart: o.quickStart, seed: o.seed, voltaCards: o.voltaCards }));
+-    setIntro(null);
++    ctl.setState(createGame({ seats: o.seats, quickStart: o.quickStart, seed: o.seed, voltaCards: o.voltaCards, rules: o.rules }));
++    // One human: introduce their company. Pass-and-play introduces each player on the pass screen.
++    setIntro(humans.length === 1 ? 'new' : null);
+     setScreen('game');
+   };
+   const resume = () => {
+@@ -51,8 +92,20 @@ export default function App() {
+     ctl.setPaused(true);
+   };
+ 
+-  if (screen === 'title' || !ctl.state) {
+-    return <TitleScreen hasSave={hasSave} onDemo={startDemo} onQuickStart={startQuick} onContinue={resume} onCustom={startCustom} />;
++  if (screen === 'setup' && setup) {
++    return <NewGameScreen key={`${setup.from}-${setup.name}`} initialName={setup.name} initialRules={setup.rules} onStart={startNew} onBack={leaveSetup} />;
++  }
++  if (screen !== 'game' || !ctl.state) {
++    return (
++      <TitleScreen
++        hasSave={hasSave}
++        lastName={loadLastCompanyName()}
++        onNewGame={() => openSetup('title')}
++        onDemo={startDemo}
++        onContinue={resume}
++        onCustom={startCustom}
++      />
++    );
+   }
+   return (
+     <GameScreen
+@@ -60,7 +113,7 @@ export default function App() {
+       intro={intro}
+       onDismissIntro={() => setIntro(null)}
+       onExit={exit}
+-      onNewGame={startQuick}
++      onNewGame={() => openSetup('game')}
+       onDemo={startDemo}
+     />
+   );
+diff --git a/src/engine/__tests__/names.test.ts b/src/engine/__tests__/names.test.ts
+new file mode 100644
+index 0000000..52f07d1
+--- /dev/null
++++ b/src/engine/__tests__/names.test.ts
+@@ -0,0 +1,306 @@
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { decideAIAction } from '../ai';
++import { CLASSIC_RULES, COMPUTE_RULES, MAX_COMPANY_NAME, sanitizeCompanyName, rulesOf } from '../constants';
++import type { SeatConfig } from '../game';
++import { applyAction, createGame, getActingPlayer } from '../game';
++import type { GameState } from '../types';
++import {
++  choiceOf,
++  cleanCompanyName,
++  leaderOf,
++  loadLastCompanyName,
++  newGameSeats,
++  rememberCompanyName,
++  rivalNamed,
++  rulesFor,
++  withCleanNames,
++} from '../../ui/companies';
++import { blankGame, place } from './helpers';
++
++// Custom company names: the engine sanitizer, the UI's stricter cleaning, and proof that a
++// name is display-only (same seed, same game).
++
++/** Build strings from code points, so invisible characters stay explicit in the source. */
++const u = (...cps: number[]) => String.fromCodePoint(...cps);
++const FALLBACK = 'Parallax Labs';
++const clean = (raw: string | null | undefined) => sanitizeCompanyName(raw, FALLBACK);
++const codePoints = (s: string) => Array.from(s).length;
++
++function hasLoneSurrogate(s: string): boolean {
++  for (let i = 0; i < s.length; i++) {
++    const c = s.charCodeAt(i);
++    if (c >= 0xd800 && c <= 0xdbff) {
++      const next = s.charCodeAt(i + 1);
++      if (!(next >= 0xdc00 && next <= 0xdfff)) return true;
++      i++;
++    } else if (c >= 0xdc00 && c <= 0xdfff) {
++      return true;
++    }
++  }
++  return false;
++}
++
++const ROCKET = u(0x1f680);
++const BIDI_CONTROLS = [0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069];
++
++describe('sanitizeCompanyName', () => {
++  it('falls back to the default for empty or whitespace-only names', () => {
++    for (const raw of [null, undefined, '', ' ', '     ', u(9, 10, 13), u(0xa0, 0x3000), u(0x200b, 0xfeff)]) {
++      expect(clean(raw)).toBe(FALLBACK);
++    }
++  });
++
++  it('collapses runs of whitespace and trims the ends', () => {
++    expect(clean('  Deep    Mind   Co  ')).toBe('Deep Mind Co');
++    expect(clean('Neo' + u(0xa0, 0xa0) + 'Labs' + u(0x3000) + 'One' + u(0x2003))).toBe('Neo Labs One');
++  });
++
++  it('removes control and zero-width characters', () => {
++    expect(clean('Ne' + u(0) + 'o' + u(7, 0x1b, 0x7f, 0x85) + ' Labs')).toBe('Neo Labs');
++    expect(clean('Pa' + u(0x200b) + 'ral' + u(0x200c) + 'lax' + u(0x200d, 0x2060, 0xfeff))).toBe('Parallax');
++  });
++
++  it('removes markup characters: < > { } [ ] backslash and backticks', () => {
++    expect(clean('<script>alert(1)</script>')).toBe('scriptalert(1)/script');
++    expect(clean('a{b}[c]`d`\\e')).toBe('abcde');
++    expect(clean('<>{}[]`')).toBe(FALLBACK);
++  });
++
++  it('caps names at MAX_COMPANY_NAME code points, never splitting a character', () => {
++    expect(MAX_COMPANY_NAME).toBe(24);
++    expect(clean('x'.repeat(40))).toBe('x'.repeat(24));
++    const rockets = clean(ROCKET.repeat(30));
++    expect(codePoints(rockets)).toBe(24);
++    expect(rockets.length).toBe(48); // UTF-16 units: the cap counts code points, not units
++    expect(hasLoneSurrogate(rockets)).toBe(false);
++    const mixed = clean('A' + ROCKET.repeat(30));
++    expect(codePoints(mixed)).toBe(24);
++    expect(hasLoneSurrogate(mixed)).toBe(false);
++    // A cut that lands after a space leaves no trailing space.
++    expect(clean('a'.repeat(23) + ' b')).toBe('a'.repeat(23));
++  });
++
++  it('keeps emoji and accented names, composing combining marks', () => {
++    expect(clean(ROCKET + ' Labs')).toBe(ROCKET + ' Labs');
++    expect(clean('Cafe' + u(0x301))).toBe('Caf' + u(0xe9)); // NFC: e + combining acute -> é
++    const zalgo = clean('Z' + u(0x336).repeat(100));
++    expect(codePoints(zalgo)).toBe(24);
++    expect(zalgo.startsWith('Z')).toBe(true);
++  });
++
++  it('strips bidirectional override and isolate characters', () => {
++    expect(clean(u(0x202e) + 'sbaL' + u(0x202c))).toBe('sbaL');
++    expect(clean('Evil' + u(0x202e) + 'gnp.exe')).toBe('Evilgnp.exe');
++    expect(clean(u(0x2066) + 'Neo' + u(0x2069) + u(0x200f) + ' Labs' + u(0x200e))).toBe('Neo Labs');
++    const all = clean('A' + BIDI_CONTROLS.map((c) => u(c)).join('') + 'B');
++    expect(all).toBe('AB');
++  });
++
++  it('is idempotent', () => {
++    for (const raw of ['  Neo   Labs ', ROCKET.repeat(30), 'Z' + u(0x336).repeat(100), '<b>x</b>', 'a'.repeat(23) + ' b', 'Cafe' + u(0x301)]) {
++      expect(clean(clean(raw))).toBe(clean(raw));
++    }
++  });
++});
++
++describe('UI name cleaning', () => {
++  it('rejects names with nothing visible left', () => {
++    for (const raw of [u(0x301, 0x301), u(0x3164), u(0x2800), u(0x115f, 0x1160), u(0xad), u(0x34f), u(0x180e)]) {
++      expect(cleanCompanyName(raw, FALLBACK)).toBe(FALLBACK);
++    }
++  });
++
++  it('treats pasted tabs and line breaks as spaces (the engine would delete them as control characters)', () => {
++    expect(cleanCompanyName('Deep' + u(9) + 'Mind' + u(10) + 'Co' + u(13, 10) + 'Two', FALLBACK)).toBe('Deep Mind Co Two');
++    expect(cleanCompanyName('Neo' + u(0x2028) + 'Labs' + u(0x85), FALLBACK)).toBe('Neo Labs');
++  });
++
++  it('drops stray leading marks and invisible fillers but keeps real names', () => {
++    expect(cleanCompanyName(u(0x301) + 'Neo', FALLBACK)).toBe('Neo');
++    expect(cleanCompanyName('a' + u(0x61c) + 'b', FALLBACK)).toBe('ab');
++    expect(cleanCompanyName('x' + u(0xad) + 'y', FALLBACK)).toBe('xy');
++    expect(cleanCompanyName('Neo ' + u(0x3164) + ' Labs', FALLBACK)).toBe('Neo Labs');
++    expect(cleanCompanyName(ROCKET, FALLBACK)).toBe(ROCKET);
++    expect(cleanCompanyName('Cafe' + u(0x301) + ' AI', FALLBACK)).toBe('Caf' + u(0xe9) + ' AI');
++  });
++
++  it('agrees with the engine sanitizer on ordinary names, stays capped and idempotent', () => {
++    for (const raw of ['Neo Labs', '  Deep   Mind ', '<x>', 'x'.repeat(50), ROCKET.repeat(30), '']) {
++      const once = cleanCompanyName(raw, FALLBACK);
++      expect(once).toBe(clean(raw));
++      expect(cleanCompanyName(once, FALLBACK)).toBe(once);
++      expect(codePoints(once)).toBeLessThanOrEqual(MAX_COMPANY_NAME);
++    }
++  });
++
++  it('spots a name that duplicates a rival, ignoring case and spacing', () => {
++    expect(rivalNamed('  helixa   BIO ')).toBe('Helixa Bio');
++    expect(rivalNamed('Stacksmith')).toBe('Stacksmith');
++    expect(rivalNamed('Parallax Labs')).toBe(null);
++    expect(rivalNamed('Helixa')).toBe(null);
++    expect(rivalNamed('')).toBe(null);
++  });
++
++  describe('remembered name', () => {
++    afterEach(() => {
++      vi.unstubAllGlobals();
++    });
++
++    it('round-trips through storage, cleaned', () => {
++      const store = new Map<string, string>();
++      vi.stubGlobal('localStorage', {
++        getItem: (k: string) => store.get(k) ?? null,
++        setItem: (k: string, v: string) => void store.set(k, v),
++      });
++      expect(loadLastCompanyName()).toBe(null);
++      rememberCompanyName('  Neo   Labs <3 ');
++      expect(loadLastCompanyName()).toBe('Neo Labs 3');
++    });
++
++    it('never throws when storage is unavailable', () => {
++      vi.stubGlobal('localStorage', {
++        getItem: () => {
++          throw new Error('denied');
++        },
++        setItem: () => {
++          throw new Error('denied');
++        },
++      });
++      expect(() => rememberCompanyName('Neo Labs')).not.toThrow();
++      expect(loadLastCompanyName()).toBe(null);
++    });
++  });
++});
++
++describe('createGame with custom names', () => {
++  it('sanitizes every seat name and defaults the rest to the company name', () => {
++    const s = createGame({
++      seed: 7,
++      seats: [
++        { companyId: 'parallax', isAI: false, name: '  <Neo>   Labs' + u(0x202e) + ' ' },
++        { companyId: 'helixa', isAI: true },
++        { companyId: 'ambulo', isAI: true, name: '   ' },
++        { companyId: 'stacksmith', isAI: true, name: 'x'.repeat(50) },
++      ],
++    });
++    expect(s.players.map((p) => p.name)).toEqual(['Neo Labs', 'Helixa Bio', 'Ambulo Robotics', 'x'.repeat(24)]);
++    expect(s.log.some((l) => l.text === 'Turn 1 — Neo Labs')).toBe(true);
++  });
++
++  it('builds the standard New Game: a named human against the three rivals', () => {
++    const s = createGame({ seed: 3, seats: newGameSeats('  Quokka   Quanta '), rules: rulesFor('compute') });
++    expect(s.players.map((p) => [p.companyId, p.name, p.isAI])).toEqual([
++      ['parallax', 'Quokka Quanta', false],
++      ['helixa', 'Helixa Bio', true],
++      ['ambulo', 'Ambulo Robotics', true],
++      ['stacksmith', 'Stacksmith', true],
++    ]);
++    expect(rulesOf(s)).toEqual(COMPUTE_RULES);
++    expect(createGame({ seed: 3, seats: newGameSeats(u(0x3164)) }).players[0].name).toBe('Parallax Labs');
++  });
++
++  it('supports pass-and-play with two named humans', () => {
++    const s = createGame({
++      seed: 11,
++      seats: [
++        { companyId: 'parallax', isAI: false, name: 'Alpha Compute' },
++        { companyId: 'helixa', isAI: false, name: 'Beta Bio' },
++        { companyId: 'ambulo', isAI: true },
++      ],
++    });
++    expect(s.players.map((p) => [p.name, p.isAI])).toEqual([
++      ['Alpha Compute', false],
++      ['Beta Bio', false],
++      ['Ambulo Robotics', true],
++    ]);
++  });
++});
++
++describe('names never change the mechanics', () => {
++  const NAMED: SeatConfig[] = [
++    { companyId: 'parallax', isAI: false, name: 'Quokka Quanta' },
++    { companyId: 'helixa', isAI: true, name: 'Zebra Genomics 9' },
++    { companyId: 'ambulo', isAI: true },
++    { companyId: 'stacksmith', isAI: true, name: 'Yak Shaving Inc' },
++  ];
++  const PLAIN: SeatConfig[] = NAMED.map(({ companyId, isAI }) => ({ companyId, isAI }));
++  const SWAPS: [string, string][] = [
++    ['Quokka Quanta', 'Parallax Labs'],
++    ['Zebra Genomics 9', 'Helixa Bio'],
++    ['Yak Shaving Inc', 'Stacksmith'],
++  ];
++
++  /** Every seat (the human's too) driven by the computer heuristic. */
++  function play(s: GameState, steps: number): GameState {
++    for (let i = 0; i < steps && s.phase !== 'gameOver'; i++) s = applyAction(s, decideAIAction(s, getActingPlayer(s)!));
++    return s;
++  }
++  /** The state with every custom name swapped back for the company name, in players and log. */
++  function unnamed(s: GameState): GameState {
++    const swap = (t: string) => SWAPS.reduce((acc, [from, to]) => acc.split(from).join(to), t);
++    return { ...s, players: s.players.map((p) => ({ ...p, name: swap(p.name) })), log: s.log.map((l) => ({ ...l, text: swap(l.text) })) };
++  }
++
++  for (const [label, rules] of [
++    ['Classic', CLASSIC_RULES],
++    ['Settlers of Compute', COMPUTE_RULES],
++  ] as const) {
++    it(`same seed, same game (${label}, 400 AI steps)`, () => {
++      for (const seed of [5, 2026]) {
++        const a = createGame({ seed, seats: NAMED, rules });
++        const b = createGame({ seed, seats: PLAIN, rules });
++        expect(a.players.map((p) => p.name)).toEqual(['Quokka Quanta', 'Zebra Genomics 9', 'Ambulo Robotics', 'Yak Shaving Inc']);
++        expect(unnamed(a)).toEqual(b);
++        const a2 = play(a, 400);
++        const b2 = play(b, 400);
++        expect(a2.turn).toBeGreaterThan(8);
++        expect(a2.log.some((l) => l.text.includes('Zebra Genomics 9'))).toBe(true);
++        expect(unnamed(a2)).toEqual(b2);
++      }
++    });
++  }
++});
++
++describe('saves and standings', () => {
++  it('old saves keep loading: clean names pass through untouched', () => {
++    const s = createGame({ seed: 9 });
++    const old = JSON.parse(JSON.stringify(s)) as GameState;
++    delete old.rules; // a pre-Session-2 save
++    expect(withCleanNames(old)).toBe(old);
++    expect(rulesOf(old)).toEqual(CLASSIC_RULES);
++    expect(choiceOf(old.rules)).toBe('classic');
++    expect(() => applyAction(old, { type: 'ROLL' })).not.toThrow();
++  });
++
++  it('re-cleans tampered save names without touching anything else', () => {
++    const s = createGame({ seed: 9 });
++    const players = s.players.map((p, i) => (i === 1 ? { ...p, name: '<b>' + 'y'.repeat(80) } : i === 2 ? { ...p, name: 42 as unknown as string } : p));
++    const tampered = { ...s, players };
++    const fixed = withCleanNames(tampered);
++    expect(fixed.players.map((p) => p.name)).toEqual(['Parallax Labs', 'b' + 'y'.repeat(23), 'Ambulo Robotics', 'Stacksmith']);
++    expect(fixed.players[0]).toBe(tampered.players[0]);
++    expect({ ...fixed, players: [] }).toEqual({ ...tampered, players: [] });
++  });
++
++  it('maps rules choices both ways', () => {
++    expect(rulesFor('compute')).toEqual(COMPUTE_RULES);
++    expect(rulesFor('compute')).not.toBe(COMPUTE_RULES);
++    expect(rulesFor('classic')).toEqual(CLASSIC_RULES);
++    expect(choiceOf(COMPUTE_RULES)).toBe('compute');
++    expect(choiceOf(undefined)).toBe('classic');
++  });
++
++  it('names a leader only when one company is strictly ahead on public points', () => {
++    let s = blankGame();
++    expect(leaderOf(s)).toBe(null);
++    s = place(s, 0, 1);
++    expect(leaderOf(s)).toBe(1);
++    s = place(s, 20, 2);
++    expect(leaderOf(s)).toBe(null); // tie
++    // A secret AI Breakthrough does not count until the game is over.
++    s = place(s, 40, 0);
++    s = { ...s, players: s.players.map((p) => (p.id === 0 ? { ...p, devCards: [{ id: 1, type: 'breakthrough', boughtOnTurn: 0 }] } : p)) };
++    expect(leaderOf(s)).toBe(null);
++    expect(leaderOf({ ...s, phase: 'gameOver' })).toBe(0);
++  });
++});
+diff --git a/src/ui/GameScreen.tsx b/src/ui/GameScreen.tsx
+index 7b0a93b..36bd251 100644
+--- a/src/ui/GameScreen.tsx
++++ b/src/ui/GameScreen.tsx
+@@ -34,6 +34,8 @@ import { scoreBreakdown } from '../engine/scoring';
+ import { RESOURCES } from '../engine/types';
+ import { SHOW_QUICK_DEMO } from './flags';
+ import type { GameController } from './useGame';
++import { LeaderMark, YouTag } from './panels';
++import { leaderOf, profileOf, shortName } from './companies';
+ 
+ interface Props {
+   ctl: GameController;
+@@ -80,7 +82,7 @@ function instruction(state: GameState, viewer: number | null, mode: Mode | null)
+       if (mode === 'road') return 'Click a glowing edge to build a Network Connection.';
+       if (mode === 'cluster') return 'Click a glowing corner to build a Compute Cluster.';
+       if (mode === 'factory') return 'Click one of your clusters to upgrade it to an AI Factory.';
+-      if (mode === 'integration') return 'Full-Stack Integration: click an open site on your network to deploy an AI Factory.';
++      if (mode === 'integration') return 'Expedited Deployment: click an open site on your network to deploy an AI Factory.';
+       return 'Trade and build, then end your turn.';
+     default:
+       return '';
+@@ -233,6 +235,11 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
+ 
+   const viewerPlayer = viewer !== null ? state.players[viewer] : null;
+   const viewerCompany = viewerPlayer ? companyById(viewerPlayer.companyId) : null;
++  // Identity: who leads, and whose move the banner is waiting on (colored when it is not yours).
++  const leader = leaderOf(state);
++  const bannerCo = acting !== null && acting !== viewer && state.phase !== 'gameOver' ? companyById(state.players[acting].companyId) : null;
++  const bannerStyle = bannerCo ? { ['--co' as string]: bannerCo.color } : undefined;
++  const currentCo = companyById(state.players[state.currentPlayer].companyId);
+   const actingName = acting !== null ? state.players[acting].name : '';
+   const round = Math.max(1, Math.ceil(state.turn / state.players.length));
+   const myGains = viewer !== null && state.lastProduction ? state.lastProduction.gains[viewer] : null;
+@@ -308,7 +315,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
+       )}
+       {tradeOpen && viewer !== null && <TradeModal state={state} player={viewer} dispatch={dispatch} onClose={() => setTradeOpen(false)} />}
+       {rulesOpen && <RulesModal onClose={() => setRulesOpen(false)} />}
+-      {intro && <IntroModal demo={intro === 'demo'} onStart={onDismissIntro} />}
++      {intro && <IntroModal demo={intro === 'demo'} state={state} viewer={viewer} onStart={onDismissIntro} />}
+       {state.phase === 'gameOver' && !winnerDismissed && (
+         <WinnerModal state={state} viewer={humans.length === 1 ? humans[0] : viewer} onNewGame={onNewGame} onDemo={onDemo} onTitle={onExit} onClose={() => setWinnerDismissed(true)} />
+       )}
+@@ -336,20 +343,25 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
+             {state.players.map((p) => {
+               const c = companyById(p.companyId);
+               const sb = scoreBreakdown(state, p.id);
+-              const cp = viewer === p.id || state.phase === 'gameOver' ? sb.total : sb.publicTotal;
++              const me = viewer === p.id;
++              const cp = me || state.phase === 'gameOver' ? sb.total : sb.publicTotal;
+               const isTurn = state.currentPlayer === p.id && state.phase !== 'gameOver';
+               return (
+                 <button
+                   key={p.id}
+-                  className={`m-chip${isTurn ? ' active' : ''}${viewer === p.id ? ' me' : ''}`}
++                  className={`m-chip${isTurn ? ' active' : ''}${me ? ' me' : ''}${leader === p.id ? ' leader' : ''}`}
+                   style={{ ['--co' as string]: c.color }}
+                   onClick={() => setSheet('market')}
+-                  aria-label={`${p.name}: ${cp} Compute Points${isTurn ? ', taking a turn' : ''}`}
++                  aria-label={`${p.name}${me ? ' (you)' : ''}: ${cp} Compute Points${leader === p.id ? ', leading' : ''}${isTurn ? ', taking a turn' : ''}`}
+                 >
+                   <span className="m-chip-name">
+-                    <CompanyDot companyId={p.companyId} size={8} /> {viewer === p.id ? 'You' : c.short}
++                    <CompanyDot companyId={p.companyId} size={8} /> <span className="m-chip-label">{me ? p.name : shortName(p)}</span>
++                  </span>
++                  <span className="m-chip-score">
++                    <b>{cp}</b>
++                    {me && <YouTag mini />}
++                    {leader === p.id && <LeaderMark size={11} />}
+                   </span>
+-                  <b>{cp}</b>
+                 </button>
+               );
+             })}
+@@ -359,8 +371,15 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
+           </button>
+         </header>
+ 
+-        <div className={`m-banner${myAction ? ' mine' : ''}${state.phase === 'moveDisruption' || state.phase === 'discard' ? ' alert' : ''}`} role="status">
+-          <span>{instruction(state, viewer, mode).replace('Click', 'Tap').replace('click', 'tap')}</span>
++        <div
++          className={`m-banner${myAction ? ' mine' : ''}${bannerCo ? ' rival-turn' : ''}${state.phase === 'moveDisruption' || state.phase === 'discard' ? ' alert' : ''}`}
++          style={bannerStyle}
++          role="status"
++        >
++          <span>
++            {bannerCo && <CompanyDot companyId={bannerCo.id} size={9} />}
++            {instruction(state, viewer, mode).replace('Click', 'Tap').replace('click', 'tap')}
++          </span>
+           {mode && myAction && state.phase === 'main' && (
+             <button className="btn small" onClick={() => setMode(null)}>
+               Cancel
+@@ -527,12 +546,20 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
+           </span>
+         </div>
+         <div className="topbar-mid">
++          {viewerPlayer && viewerCompany && (
++            <span className="chip you-chip" style={{ ['--co' as string]: viewerCompany.color }} title={`You are ${viewerPlayer.name} (${profileOf(viewerCompany.id).colorName} pieces)`}>
++              <YouTag mini />
++              <CompanyDot companyId={viewerPlayer.companyId} />
++              <span className="you-chip-name">{viewerPlayer.name}</span>
++            </span>
++          )}
+           {state.scenario && <span className="chip scenario">{state.scenario}</span>}
+           <span className="chip">{state.phase === 'setup' ? 'Opening draft' : `Round ${round} · Turn ${state.turn}`}</span>
+           {acting !== null && (
+-            <span className="chip turn-chip">
+-              <CompanyDot companyId={state.players[state.currentPlayer].companyId} />
+-              {state.players[state.currentPlayer].name}
++            <span className={`chip turn-chip${state.currentPlayer === viewer ? ' mine' : ''}`} style={{ ['--co' as string]: currentCo.color }}>
++              <span className="turn-chip-label">Now</span>
++              <CompanyDot companyId={currentCo.id} />
++              <span className="turn-chip-name">{state.currentPlayer === viewer ? 'Your turn' : state.players[state.currentPlayer].name}</span>
+             </span>
+           )}
+         </div>
+@@ -558,7 +585,12 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
+       </aside>
+ 
+       <main className="col center">
+-        <div className={`banner${myAction ? ' mine' : ''}${state.phase === 'moveDisruption' || state.phase === 'discard' ? ' alert' : ''}`} role="status">
++        <div
++          className={`banner${myAction ? ' mine' : ''}${bannerCo ? ' rival-turn' : ''}${state.phase === 'moveDisruption' || state.phase === 'discard' ? ' alert' : ''}`}
++          style={bannerStyle}
++          role="status"
++        >
++          {bannerCo && <CompanyDot companyId={bannerCo.id} size={10} />}
+           {instruction(state, viewer, mode)}
+         </div>
+         {boardEl}
+diff --git a/src/ui/NewGameScreen.tsx b/src/ui/NewGameScreen.tsx
+new file mode 100644
+index 0000000..5626891
+--- /dev/null
++++ b/src/ui/NewGameScreen.tsx
+@@ -0,0 +1,218 @@
++import type { FormEvent } from 'react';
++import { useEffect, useRef, useState } from 'react';
++import { MAX_COMPANY_NAME, VP_TO_WIN } from '../engine/constants';
++import type { RuleOptions } from '../engine/types';
++import type { RulesChoice } from './companies';
++import { DEFAULT_COMPANY_NAME, HUMAN_COMPANY, RIVALS, cleanCompanyName, profileOf, rivalNamed, rulesFor } from './companies';
++import { CompanyDot } from './panels';
++
++/** Drifting hex field behind the title and New Game screens. */
++export function TitleBackdrop() {
++  return (
++    <div className="title-bg" aria-hidden="true">
++      {Array.from({ length: 14 }).map((_, i) => (
++        <span
++          key={i}
++          className="title-hex"
++          style={{ ['--i' as string]: i, left: `${(i * 37 + 5) % 100}%`, top: `${(i * 53 + 8) % 92}%`, transform: `scale(${0.5 + ((i * 7) % 5) * 0.2})` }}
++        />
++      ))}
++    </div>
++  );
++}
++
++const RULES_OPTIONS: { id: RulesChoice; title: string; tag?: string; lines: [string, string][] }[] = [
++  {
++    id: 'compute',
++    title: 'Settlers of Compute',
++    tag: 'Recommended',
++    lines: [
++      ['Financing', 'upgrade now with 2 GPUs, pay it back from production.'],
++      ['Full-Stack', 'build across the stack to unlock direct AI Factory deployment.'],
++    ],
++  },
++  {
++    id: 'classic',
++    title: 'Classic',
++    lines: [
++      ['Original rules', 'roll, collect, trade and build.'],
++      ['', 'No Financing, no Full-Stack.'],
++    ],
++  },
++];
++
++/** Settlers of Compute (Financing + Full-Stack) or Classic. Shared by New Game and Custom game. */
++export function RulesPicker({ value, onChange, name }: { value: RulesChoice; onChange: (c: RulesChoice) => void; name: string }) {
++  return (
++    <div className="rules-pick" role="radiogroup" aria-label="Rules">
++      {RULES_OPTIONS.map((o) => (
++        <label key={o.id} className={`rules-option${value === o.id ? ' on' : ''}`}>
++          <input type="radio" name={name} value={o.id} checked={value === o.id} onChange={() => onChange(o.id)} />
++          <span className="rules-option-head">
++            <strong>{o.title}</strong>
++            {o.tag && <span className="rules-tag">{o.tag}</span>}
++          </span>
++          {o.lines.map(([k, v]) => (
++            <span key={k + v} className="rules-line small">
++              {k && <b>{k}: </b>}
++              {v}
++            </span>
++          ))}
++        </label>
++      ))}
++    </div>
++  );
++}
++
++export interface NewGameChoice {
++  /** Already cleaned with `cleanCompanyName`. */
++  name: string;
++  rules: RuleOptions;
++}
++
++/** One-screen setup for the standard game: name your company, meet the rivals, pick the rules. */
++export function NewGameScreen({
++  initialName,
++  initialRules,
++  onStart,
++  onBack,
++}: {
++  initialName: string;
++  initialRules: RulesChoice;
++  onStart: (o: NewGameChoice) => void;
++  onBack: () => void;
++}) {
++  const [name, setName] = useState(initialName);
++  const [rules, setRules] = useState<RulesChoice>(initialRules);
++  const inputRef = useRef<HTMLInputElement>(null);
++  const finalName = cleanCompanyName(name, DEFAULT_COMPANY_NAME);
++  const clash = rivalNamed(finalName);
++  const problem = clash ? `${clash} is already in this market. Pick another name.` : null;
++  const you = profileOf(HUMAN_COMPANY.id);
++
++  const start = () => {
++    if (!problem) onStart({ name: finalName, rules: rulesFor(rules) });
++  };
++  const submit = (e: FormEvent) => {
++    e.preventDefault();
++    start();
++  };
++
++  // With a mouse, focus the name ready to overwrite. On touch, wait for a tap (no surprise keyboard).
++  useEffect(() => {
++    if (window.matchMedia?.('(pointer: fine)').matches) {
++      inputRef.current?.focus();
++      inputRef.current?.select();
++    }
++  }, []);
++
++  // Enter starts from anywhere on the screen (the name field submits the form itself); Esc goes back.
++  useEffect(() => {
++    const onKey = (e: KeyboardEvent) => {
++      if (e.defaultPrevented || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
++      if (e.key === 'Escape') {
++        onBack();
++        return;
++      }
++      if (e.key !== 'Enter') return;
++      const t = e.target;
++      if (t instanceof HTMLButtonElement || t instanceof HTMLAnchorElement || t instanceof HTMLTextAreaElement) return;
++      if (t instanceof HTMLInputElement && t.type === 'text') return;
++      e.preventDefault();
++      start();
++    };
++    window.addEventListener('keydown', onKey);
++    return () => window.removeEventListener('keydown', onKey);
++  });
++
++  return (
++    <div className="title setup">
++      <TitleBackdrop />
++      <form className="title-card setup-card" onSubmit={submit} aria-labelledby="setup-title" noValidate>
++        <p className="eyebrow">
++          Settlers <em>of</em> Compute · New game
++        </p>
++        <h1 id="setup-title" className="setup-title">
++          Found your AI company
++        </h1>
++        <p className="setup-premise">
++          You run a young AI company racing three rivals for Power, Networking, Land, Capital and GPUs. Turn them into Compute Clusters and AI Factories. First to{' '}
++          {VP_TO_WIN} Compute Points wins.
++        </p>
++
++        <div className="setup-section you-section" style={{ ['--co' as string]: HUMAN_COMPANY.color }}>
++          <label className="field-label" htmlFor="company-name">
++            Name your company
++          </label>
++          <div className="name-row">
++            <CompanyDot companyId={HUMAN_COMPANY.id} size={18} />
++            <input
++              id="company-name"
++              ref={inputRef}
++              className="name-input"
++              type="text"
++              value={name}
++              maxLength={MAX_COMPANY_NAME}
++              placeholder={DEFAULT_COMPANY_NAME}
++              autoComplete="off"
++              autoCapitalize="words"
++              spellCheck={false}
++              enterKeyHint="go"
++              aria-describedby="company-name-hint"
++              onChange={(e) => setName(e.target.value)}
++            />
++            <span className="name-count" aria-hidden="true">
++              {Array.from(name).length}/{MAX_COMPANY_NAME}
++            </span>
++          </div>
++          <p id="company-name-hint" className="field-hint small">
++            <span className="your-color">
++              <i aria-hidden="true" />
++              Your color: {you.colorName}
++            </span>
++            <span className="muted"> · {HUMAN_COMPANY.sector} · You move first</span>
++          </p>
++          {problem && (
++            <p className="why small" role="alert">
++              {problem}
++            </p>
++          )}
++        </div>
++
++        <section className="setup-section" aria-labelledby="rivals-h">
++          <h2 id="rivals-h" className="setup-h">
++            Your rivals <span className="muted">· computer-controlled</span>
++          </h2>
++          <div className="rival-cards">
++            {RIVALS.map((c) => (
++              <div key={c.id} className="rival-card" style={{ ['--co' as string]: c.color }}>
++                <CompanyDot companyId={c.id} size={12} />
++                <div>
++                  <strong>{c.name}</strong>
++                  <span className="small muted">{c.sector}</span>
++                  <span className="small rival-plan">{profileOf(c.id).plan}</span>
++                </div>
++              </div>
++            ))}
++          </div>
++        </section>
++
++        <section className="setup-section" aria-labelledby="rules-h">
++          <h2 id="rules-h" className="setup-h">
++            Rules
++          </h2>
++          <RulesPicker value={rules} onChange={setRules} name="new-game-rules" />
++        </section>
++
++        <div className="setup-actions">
++          <button type="button" className="btn" onClick={onBack}>
++            Back
++          </button>
++          <button type="submit" className="btn primary big setup-start" disabled={!!problem}>
++            ▶ Start game <span className="btn-sub">as {finalName}</span>
++          </button>
++        </div>
++      </form>
++    </div>
++  );
++}
+diff --git a/src/ui/TitleScreen.tsx b/src/ui/TitleScreen.tsx
+index 4f2f06c..1a5204c 100644
+--- a/src/ui/TitleScreen.tsx
++++ b/src/ui/TitleScreen.tsx
+@@ -1,32 +1,40 @@
+ import { useState } from 'react';
+-import { COMPANIES, RESOURCE_INFO } from '../engine/constants';
++import { COMPANIES, MAX_COMPANY_NAME, RESOURCE_INFO } from '../engine/constants';
+ import type { SeatConfig } from '../engine/game';
++import type { RuleOptions } from '../engine/types';
+ import { RESOURCES } from '../engine/types';
+ import { ResourceIcon } from './icons';
+ import { CompanyDot } from './panels';
+ import { AboutModal, RulesModal } from './modals';
+-import { VOLTA_BRANDING, VoltaWordmark } from './brand';
++import { PUBLIC_DISCLAIMER, VOLTA_BRANDING, VoltaWordmark } from './brand';
+ import { SHOW_QUICK_DEMO } from './flags';
++import type { RulesChoice } from './companies';
++import { HUMAN_COMPANY, cleanCompanyName, nameKey, profileOf, rulesFor } from './companies';
++import { RulesPicker, TitleBackdrop } from './NewGameScreen';
+ 
+ export interface CustomOptions {
+   seats: SeatConfig[];
+   quickStart: boolean;
+   seed?: number;
+   voltaCards?: boolean;
++  rules: RuleOptions;
+ }
+ 
+ type SeatMode = 'human' | 'ai' | 'off';
+ 
+ export function TitleScreen({
+   hasSave,
++  lastName,
++  onNewGame,
+   onDemo,
+-  onQuickStart,
+   onContinue,
+   onCustom,
+ }: {
+   hasSave: boolean;
++  /** The player's last company name, prefilled for the first human seat of a custom game. */
++  lastName: string | null;
++  onNewGame: () => void;
+   onDemo: () => void;
+-  onQuickStart: () => void;
+   onContinue: () => void;
+   onCustom: (o: CustomOptions) => void;
+ }) {
+@@ -34,24 +42,22 @@ export function TitleScreen({
+   const [rules, setRules] = useState(false);
+   const [about, setAbout] = useState(false);
+   const [seatModes, setSeatModes] = useState<SeatMode[]>(['human', 'ai', 'ai', 'ai']);
++  const [seatNames, setSeatNames] = useState<string[]>(() => COMPANIES.map((_, i) => (i === 0 ? (lastName ?? '') : '')));
+   const [quickStart, setQuickStart] = useState(true);
+   const [seedText, setSeedText] = useState('');
+   const [voltaCards, setVoltaCards] = useState(false);
++  const [rulesChoice, setRulesChoice] = useState<RulesChoice>('compute');
+ 
+-  const active = seatModes.filter((m) => m !== 'off').length;
+-  const customProblem = active < 2 ? 'Pick at least 2 companies.' : null;
++  // Humans may rename their company; computer seats keep the company name.
++  const seatName = (i: number) => (seatModes[i] === 'human' ? cleanCompanyName(seatNames[i], COMPANIES[i].name) : COMPANIES[i].name);
++  const activeSeats = COMPANIES.map((_, i) => i).filter((i) => seatModes[i] !== 'off');
++  const names = activeSeats.map((i) => nameKey(seatName(i)));
++  const customProblem =
++    activeSeats.length < 2 ? 'Pick at least 2 companies.' : new Set(names).size < names.length ? 'Each company needs a different name.' : null;
+ 
+   return (
+     <div className="title">
+-      <div className="title-bg" aria-hidden="true">
+-        {Array.from({ length: 14 }).map((_, i) => (
+-          <span
+-            key={i}
+-            className="title-hex"
+-            style={{ ['--i' as string]: i, left: `${(i * 37 + 5) % 100}%`, top: `${(i * 53 + 8) % 92}%`, transform: `scale(${0.5 + ((i * 7) % 5) * 0.2})` }}
+-          />
+-        ))}
+-      </div>
++      <TitleBackdrop />
+       <div className="title-card">
+         {VOLTA_BRANDING ? (
+           <p className="spec-line" aria-hidden="true">
+@@ -64,13 +70,19 @@ export function TitleScreen({
+           SETTLERS <em>of</em> COMPUTE
+         </h1>
+         <p className="tagline">The race to build the AI economy.</p>
+-        {VOLTA_BRANDING && (
++        {VOLTA_BRANDING ? (
+           <p className="presented-by">
+             <span className="presented-rule" aria-hidden="true" />
+             <span className="presented-label">Brought to you by</span>
+             <VoltaWordmark size={22} />
+             <span className="presented-rule" aria-hidden="true" />
+           </p>
++        ) : (
++          <p className="concept-line">
++            <span className="presented-rule" aria-hidden="true" />
++            <span className="concept-label">A concept for Volta</span>
++            <span className="presented-rule" aria-hidden="true" />
++          </p>
+         )}
+         <p className="lede">
+           Compute is no longer just for giants. Four ambitious AI companies. One emerging market. Build your infrastructure, make your deals, and become the market leader.
+@@ -87,7 +99,7 @@ export function TitleScreen({
+ 
+         {!custom ? (
+           <div className="title-actions">
+-            <button className="btn primary big" onClick={onQuickStart}>
++            <button className="btn primary big" onClick={onNewGame}>
+               ▶ New Game <span className="btn-sub">Found your AI company · You vs. 3 AI rivals</span>
+             </button>
+             {SHOW_QUICK_DEMO && (
+@@ -115,14 +127,16 @@ export function TitleScreen({
+         ) : (
+           <div className="custom">
+             <h2>Custom game</h2>
+-            <p className="muted small">Mix humans (pass-and-play on one device) and AI companies, 2–4 total.</p>
++            <p className="muted small">Mix humans (pass-and-play on one device) and AI companies, 2–4 total. Humans can name their company.</p>
+             <div className="seats">
+               {COMPANIES.map((c, i) => (
+-                <div key={c.id} className="seat">
++                <div key={c.id} className={`seat${seatModes[i] === 'human' ? ' human' : ''}`} style={{ ['--co' as string]: c.color }}>
+                   <CompanyDot companyId={c.id} size={14} />
+                   <div className="seat-name">
+                     <strong>{c.name}</strong>
+-                    <span className="small muted">{c.sector}</span>
++                    <span className="small muted">
++                      {c.sector} · {profileOf(c.id).strategy}
++                    </span>
+                   </div>
+                   <div className="seg" role="radiogroup" aria-label={`${c.name} seat`}>
+                     {(['human', 'ai', 'off'] as SeatMode[]).map((m) => (
+@@ -137,15 +151,35 @@ export function TitleScreen({
+                       </button>
+                     ))}
+                   </div>
++                  {seatModes[i] === 'human' && (
++                    <label className="seat-rename">
++                      <span className="small muted">Company name</span>
++                      <input
++                        type="text"
++                        className="name-input small-input"
++                        value={seatNames[i]}
++                        maxLength={MAX_COMPANY_NAME}
++                        placeholder={c.name}
++                        autoComplete="off"
++                        spellCheck={false}
++                        aria-label={`Name for the ${c.name} seat`}
++                        onChange={(e) => setSeatNames((s) => s.map((x, j) => (j === i ? e.target.value : x)))}
++                      />
++                    </label>
++                  )}
+                 </div>
+               ))}
+             </div>
++            <div className="custom-rules">
++              <span className="small muted">Rules</span>
++              <RulesPicker value={rulesChoice} onChange={setRulesChoice} name="custom-rules" />
++            </div>
+             <div className="custom-opts">
+               <label>
+                 <input type="checkbox" checked={quickStart} onChange={(e) => setQuickStart(e.target.checked)} /> Quick Start opening (uncheck for a manual snake draft)
+               </label>
+               <label>
+-                <input type="checkbox" checked={voltaCards} onChange={(e) => setVoltaCards(e.target.checked)} /> Special cards (beta): add 2 × Full-Stack Integration to the Innovation deck
++                <input type="checkbox" checked={voltaCards} onChange={(e) => setVoltaCards(e.target.checked)} /> Special cards (beta): add 2 × Expedited Deployment to the Innovation deck
+               </label>
+               <label>
+                 Board seed{' '}
+@@ -169,12 +203,15 @@ export function TitleScreen({
+                 disabled={!!customProblem}
+                 onClick={() =>
+                   onCustom({
+-                    seats: COMPANIES.map((c, i) => ({ companyId: c.id, mode: seatModes[i] }))
+-                      .filter((x) => x.mode !== 'off')
+-                      .map((x) => ({ companyId: x.companyId, isAI: x.mode === 'ai' })),
++                    seats: activeSeats.map((i) => ({
++                      companyId: COMPANIES[i].id,
++                      isAI: seatModes[i] === 'ai',
++                      ...(seatModes[i] === 'human' ? { name: seatName(i) } : {}),
++                    })),
+                     quickStart,
+                     seed: seedText ? Number(seedText) : undefined,
+                     voltaCards,
++                    rules: rulesFor(rulesChoice),
+                   })
+                 }
+               >
+@@ -190,7 +227,9 @@ export function TitleScreen({
+               <CompanyDot companyId={c.id} size={12} />
+               <div>
+                 <strong>{c.name}</strong>
+-                <span className="small muted">{c.sector}</span>
++                <span className="small muted">
++                  {c.sector} · <span className="co-role">{c.id === HUMAN_COMPANY.id ? 'You' : profileOf(c.id).strategy}</span>
++                </span>
+                 <span className="tiny muted">{c.tagline}</span>
+               </div>
+             </div>
+@@ -200,7 +239,7 @@ export function TitleScreen({
+         <p className="disclaimer">
+           {VOLTA_BRANDING
+             ? 'Concept build: Volta branding is shown for review and is not approved for public release. Catan-inspired; not affiliated with Catan rights holders. Company names in the game are fictional.'
+-            : 'Independent, unofficial, Catan-inspired creative prototype. Not affiliated with, sponsored or endorsed by Volta or Catan rights holders. All company names are fictional.'}
++            : PUBLIC_DISCLAIMER}
+         </p>
+       </div>
+       {rules && <RulesModal onClose={() => setRules(false)} />}
+diff --git a/src/ui/brand.tsx b/src/ui/brand.tsx
+index ff0102b..ffda3b4 100644
+--- a/src/ui/brand.tsx
++++ b/src/ui/brand.tsx
+@@ -8,6 +8,14 @@ export const VOLTA_BRANDING: boolean = import.meta.env.VITE_VOLTA_BRANDING
+ /** Volta's website, set via VITE_VOLTA_URL once confirmed. The link is hidden when unset. */
+ export const VOLTA_SITE_URL: string | null = import.meta.env.VITE_VOLTA_URL || null;
+ 
++/**
++ * The public build's small print. Both facts must stay: the game is not affiliated with or
++ * endorsed by Volta (the public title only says "A concept for Volta", never sponsorship), and it
++ * is an unofficial, Catan-inspired prototype.
++ */
++export const PUBLIC_DISCLAIMER =
++  'Independent creative prototype. Not affiliated with or endorsed by Volta. Unofficial and Catan-inspired; not affiliated with Catan rights holders. All company names are fictional.';
++
+ /**
+  * Typographic placeholder wordmark. Replace with Volta's official logo asset (SVG from their
+  * press kit) before any public use; no official asset was available in this environment.
+diff --git a/src/ui/companies.ts b/src/ui/companies.ts
+new file mode 100644
+index 0000000..897b608
+--- /dev/null
++++ b/src/ui/companies.ts
+@@ -0,0 +1,152 @@
++import { CLASSIC_RULES, COMPANIES, COMPUTE_RULES, companyById, sanitizeCompanyName } from '../engine/constants';
++import type { SeatConfig } from '../engine/game';
++import { DEFAULT_SEATS } from '../engine/game';
++import { scoreBreakdown } from '../engine/scoring';
++import type { GameState, Player, RuleOptions } from '../engine/types';
++
++// Company identity for the UI: who you are, who the rivals are and how they like to play.
++// Pure data and helpers (no React), so the engine tests can exercise them too.
++
++export interface CompanyProfile {
++  /** One or two words for the scoreboard: how this company likes to play. */
++  strategy: string;
++  /** One line for the New Game screen. */
++  plan: string;
++  /** Plain color name, so a player can match the swatch to their pieces on the board. */
++  colorName: string;
++}
++
++// Mirrors the computer players' style weights in COMPANIES (cards / expansion / factories).
++const PROFILES: Record<string, CompanyProfile> = {
++  parallax: { strategy: 'Balanced', plan: 'Frontier AI lab on a startup budget. A balanced builder.', colorName: 'blue' },
++  helixa: { strategy: 'Innovation', plan: 'Innovation-focused: invests in Innovation Cards.', colorName: 'red' },
++  ambulo: { strategy: 'Expansion', plan: 'Aggressive territorial expansion: grabs new sites and long networks.', colorName: 'orange' },
++  stacksmith: { strategy: 'Factories', plan: 'Factory-focused builder: upgrades to AI Factories early.', colorName: 'white' },
++};
++
++export function profileOf(companyId: string): CompanyProfile {
++  return PROFILES[companyId] ?? PROFILES.parallax;
++}
++
++/** The human's company in a standard New Game, and its default name. */
++export const HUMAN_COMPANY = COMPANIES[0];
++export const DEFAULT_COMPANY_NAME = HUMAN_COMPANY.name;
++
++/** The three computer rivals of a standard New Game. */
++export const RIVALS = DEFAULT_SEATS.filter((s) => s.isAI).map((s) => companyById(s.companyId));
++
++// ---------------------------------------------------------------------------
++// Names
++// ---------------------------------------------------------------------------
++
++// Characters that render as nothing (or reorder text) but survive the engine's sanitizer:
++// soft hyphen, combining grapheme joiner, Arabic letter mark, Hangul/Khmer/Mongolian fillers,
++// blank braille, interlinear annotation marks. Variation selectors stay (emoji need them).
++const INVISIBLE = /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2800\u3164\uffa0\ufff9-\ufffb]/gu;
++
++// Tabs and line breaks in a pasted name separate words; the engine would delete them outright.
++const BREAKS = /[\t\n\v\f\r\u0085\u2028\u2029]/g;
++
++/**
++ * A company name as the UI accepts it: the engine's `sanitizeCompanyName`, minus invisible
++ * filler characters and stray leading combining marks, falling back when nothing visible is left.
++ * Idempotent, and never longer than the engine's cap.
++ */
++export function cleanCompanyName(raw: string | null | undefined, fallback: string): string {
++  const base = sanitizeCompanyName((raw ?? '').replace(BREAKS, ' '), '');
++  const visible = base.replace(INVISIBLE, '').replace(/^[\p{M}\s]+/u, '');
++  return sanitizeCompanyName(/[\p{L}\p{N}\p{S}\p{P}]/u.test(visible) ? visible : '', fallback);
++}
++
++/** Case- and spacing-insensitive key for spotting two companies with the same name. */
++export function nameKey(name: string): string {
++  return cleanCompanyName(name, '').toLocaleLowerCase();
++}
++
++/** The rival whose name `name` would duplicate, if any (only computer seats are checked). */
++export function rivalNamed(name: string): string | null {
++  const key = nameKey(name);
++  if (!key) return null;
++  return RIVALS.find((c) => nameKey(c.name) === key)?.name ?? null;
++}
++
++/** Short label for tight spaces (mobile chips): the company's short name unless renamed. */
++export function shortName(p: Player): string {
++  const c = companyById(p.companyId);
++  return p.name === c.name ? c.short : p.name;
++}
++
++const NAME_KEY = 'settlers-of-compute:company-name:v1';
++
++/** The company name the player used last time, if storage has one. */
++export function loadLastCompanyName(): string | null {
++  try {
++    const raw = localStorage.getItem(NAME_KEY);
++    return raw ? cleanCompanyName(raw, DEFAULT_COMPANY_NAME) : null;
++  } catch {
++    return null;
++  }
++}
++
++export function rememberCompanyName(name: string): void {
++  try {
++    localStorage.setItem(NAME_KEY, cleanCompanyName(name, DEFAULT_COMPANY_NAME));
++  } catch {
++    /* storage unavailable: the name is only a convenience */
++  }
++}
++
++/** Re-clean player names from a saved game (old saves simply carry the company names). */
++export function withCleanNames(s: GameState): GameState {
++  if (!Array.isArray(s.players)) return s;
++  const players = s.players.map((p) => {
++    const name = cleanCompanyName(typeof p.name === 'string' ? p.name : '', companyById(p.companyId).name);
++    return name === p.name ? p : { ...p, name };
++  });
++  return players.every((p, i) => p === s.players[i]) ? s : { ...s, players };
++}
++
++// ---------------------------------------------------------------------------
++// Setup
++// ---------------------------------------------------------------------------
++
++export type RulesChoice = 'compute' | 'classic';
++
++export function rulesFor(choice: RulesChoice): RuleOptions {
++  return choice === 'classic' ? { ...CLASSIC_RULES } : { ...COMPUTE_RULES };
++}
++
++/** Which New Game option a game's rules correspond to (old saves read as Classic). */
++export function choiceOf(rules: RuleOptions | undefined): RulesChoice {
++  return rules && (rules.financing || rules.fullStack) ? 'compute' : 'classic';
++}
++
++/** Seats for a standard New Game: you (seat 0) against the three computer rivals. */
++export function newGameSeats(name: string): SeatConfig[] {
++  return DEFAULT_SEATS.map((s, i) => (i === 0 ? { ...s, name: cleanCompanyName(name, DEFAULT_COMPANY_NAME) } : { ...s }));
++}
++
++// ---------------------------------------------------------------------------
++// Standings
++// ---------------------------------------------------------------------------
++
++/**
++ * The company strictly ahead on public Compute Points (all points once the game is over), or
++ * null on a tie or before anyone scores. Secret AI Breakthroughs never leak into it.
++ */
++export function leaderOf(state: GameState): number | null {
++  const over = state.phase === 'gameOver';
++  let best = -1;
++  let leader: number | null = null;
++  for (const p of state.players) {
++    const sb = scoreBreakdown(state, p.id);
++    const cp = over ? sb.total : sb.publicTotal;
++    if (cp > best) {
++      best = cp;
++      leader = p.id;
++    } else if (cp === best) {
++      leader = null;
++    }
++  }
++  return best > 0 ? leader : null;
++}
+diff --git a/src/ui/modals.tsx b/src/ui/modals.tsx
+index da31126..f1bc901 100644
+--- a/src/ui/modals.tsx
++++ b/src/ui/modals.tsx
+@@ -8,7 +8,8 @@ import { RESOURCES } from '../engine/types';
+ import { SHOW_QUICK_DEMO } from './flags';
+ import { ResourceIcon } from './icons';
+ import { CompanyDot } from './panels';
+-import { VOLTA_BRANDING, VOLTA_SITE_URL, VoltaWordmark } from './brand';
++import { PUBLIC_DISCLAIMER, VOLTA_BRANDING, VOLTA_SITE_URL, VoltaWordmark } from './brand';
++import { profileOf } from './companies';
+ 
+ export function Modal({ title, children, onClose, wide = false, className = '' }: { title: string; children: ReactNode; onClose?: () => void; wide?: boolean; className?: string }) {
+   const ref = useRef<HTMLDivElement>(null);
+@@ -526,27 +527,59 @@ export function RulesModal({ onClose }: { onClose: () => void }) {
+   );
+ }
+ 
+-export function IntroModal({ onStart, demo }: { onStart: () => void; demo: boolean }) {
++export function IntroModal({ onStart, demo, state, viewer = null }: { onStart: () => void; demo: boolean; state?: GameState; viewer?: number | null }) {
++  // Who "you" are: the viewer's company (custom name included), or Parallax Labs by default.
++  const me = state && viewer !== null ? state.players[viewer] : null;
++  const co = me ? companyById(me.companyId) : COMPANIES[0];
++  const name = me?.name ?? co.name;
++  const rivals = state ? state.players.filter((p) => p.id !== viewer) : [];
++  const draft = state?.phase === 'setup';
+   return (
+     <Modal title={demo ? 'Quick Demo' : 'New game'} onClose={onStart} className="intro-modal">
+       <div className="intro">
++        <div className="intro-you" style={{ ['--co' as string]: co.color }}>
++          <CompanyDot companyId={co.id} size={22} />
++          <div>
++            <span className="intro-you-label">You are</span>
++            <strong className="intro-you-name">{name}</strong>
++            <span className="small muted">
++              {co.sector} · your pieces are <b className="intro-you-color">{profileOf(co.id).colorName}</b>
++            </span>
++          </div>
++        </div>
+         <p className="intro-lede">
+           Compute is no longer just for giants. Four ambitious AI companies. One emerging market. Build your infrastructure, make your deals, and become the market leader.
+         </p>
+         {demo ? (
+           <ol className="intro-steps">
+             <li>
+-              You are <b style={{ color: COMPANIES[0].color }}>Parallax Labs</b>, a frontier lab, a few moves from contention midway through the game.
++              You are <b style={{ color: co.color }}>{name}</b>, a frontier lab, a few moves from contention midway through the game.
+             </li>
+             <li>You've already rolled. Check your resources — you can build right now, or trade for the GPU you need for an AI Factory.</li>
+             <li>When you end your turn, three AI rivals play through the real engine. Follow them in the Activity feed.</li>
+           </ol>
+         ) : (
+           <ol className="intro-steps">
+-            <li>Each company starts with two Compute Clusters and two Network Connections.</li>
++            <li>
++              {draft
++                ? 'Opening draft: each company places a Compute Cluster and a Network Connection, then again in reverse order.'
++                : 'Each company starts with two Compute Clusters and two Network Connections.'}
++            </li>
+             <li>Roll, collect, trade and build. First to 10 Compute Points wins.</li>
+           </ol>
+         )}
++        {rivals.length > 0 && (
++          <div className="intro-rivals">
++            <span className="small muted">{rivals.length === 1 ? 'Your rival' : 'Your rivals'}</span>
++            {rivals.map((p) => (
++              <span key={p.id} className="intro-rival" style={{ ['--co' as string]: companyById(p.companyId).color }}>
++                <CompanyDot companyId={p.companyId} size={10} />
++                <span className="intro-rival-name">{p.name}</span>
++                <span className="strategy-tag">{p.isAI ? profileOf(p.companyId).strategy : 'Human'}</span>
++              </span>
++            ))}
++          </div>
++        )}
+         <div className="modal-actions">
+           <button className="btn primary" onClick={onStart}>
+             {demo ? 'Take my turn' : 'Start'}
+@@ -565,9 +598,12 @@ export function PassScreen({ state, player, onReveal }: { state: GameState; play
+       <div className="pass-card" style={{ ['--co' as string]: c.color }}>
+         <CompanyDot companyId={p.companyId} size={28} />
+         <h1>Pass to {p.name}</h1>
++        <p className="pass-color small">
++          {c.sector} · plays the <b>{profileOf(c.id).colorName}</b> pieces
++        </p>
+         <p className="muted">Hands are hidden between players. Only {p.name} should look.</p>
+         <button className="btn primary" onClick={onReveal} autoFocus>
+-          I'm {c.short} — show my hand
++          I'm {p.name} — show my hand
+         </button>
+       </div>
+     </div>
+@@ -602,9 +638,7 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
+           <li>The Quick Demo is a real midgame reached by the engine itself, not a scripted mock-up.</li>
+           <li>Designed and built with Claude Code.</li>
+         </ul>
+-        <p className="muted small">
+-          Independent, unofficial, Catan-inspired creative prototype. Not affiliated with, sponsored or endorsed by Volta or Catan rights holders. All company names are fictional.
+-        </p>
++        <p className="muted small">{PUBLIC_DISCLAIMER}</p>
+       </div>
+     </Modal>
+   );
+diff --git a/src/ui/panels.tsx b/src/ui/panels.tsx
+index ad46eca..f71009c 100644
+--- a/src/ui/panels.tsx
++++ b/src/ui/panels.tsx
+@@ -9,6 +9,9 @@ import type { DevCardType, GameState, LogEntry } from '../engine/types';
+ import { RESOURCES } from '../engine/types';
+ import { ClusterShape, FactoryShape } from './Board';
+ import { DieFace, ResourceChip, ResourceIcon } from './icons';
++import { financedVertices } from '../engine/financing';
++import { hasFullStack } from '../engine/fullstack';
++import { leaderOf, profileOf } from './companies';
+ 
+ function PieceGlyph({ kind, color, stroke }: { kind: 'cluster' | 'factory'; color: string; stroke: string }) {
+   return (
+@@ -27,8 +30,29 @@ export function CompanyDot({ companyId, size = 10 }: { companyId: string; size?:
+ // Scoreboard
+ // ---------------------------------------------------------------------------
+ 
++/** Marks the company the person at the screen controls (follows the viewer in pass-and-play). */
++export function YouTag({ mini = false }: { mini?: boolean }) {
++  return (
++    <span className={`you-tag${mini ? ' mini' : ''}`} title="Your company">
++      YOU
++    </span>
++  );
++}
++
++/** Crown for the company strictly ahead on public Compute Points (none on a tie). */
++export function LeaderMark({ size = 13 }: { size?: number }) {
++  return (
++    <svg className="leader-mark" width={size} height={size} viewBox="0 0 16 16" role="img" aria-label="Leader">
++      <title>Leader: most public Compute Points</title>
++      <path d="M2 12.2 1 4.6l4 3L8 2.4l3 5.2 4-3-1 7.6Z" fill="currentColor" />
++      <rect x="2" y="13.3" width="12" height="1.7" rx="0.85" fill="currentColor" />
++    </svg>
++  );
++}
++
+ export function Scoreboard({ state, viewer }: { state: GameState; viewer: number | null }) {
+   const acting = getActingPlayer(state);
++  const leader = leaderOf(state);
+   return (
+     <section className="panel scoreboard" aria-label="Companies">
+       <header className="panel-head">
+@@ -44,18 +68,46 @@ export function Scoreboard({ state, viewer }: { state: GameState; viewer: number
+         const thinking = acting === p.id && p.isAI && state.phase !== 'gameOver';
+         const cards = sumBundle(p.resources);
+         const left = piecesLeft(state, p.id);
++        const leveraged = financedVertices(state, p.id).length;
+         return (
+-          <article key={p.id} className={`company${isTurn ? ' active' : ''}${isViewer ? ' viewer' : ''}${state.winner === p.id ? ' winner' : ''}`} style={{ ['--co' as string]: c.color }}>
++          <article
++            key={p.id}
++            className={`company${isTurn ? ' active' : ''}${isViewer ? ' viewer' : ''}${state.winner === p.id ? ' winner' : ''}${leader === p.id ? ' leader' : ''}`}
++            style={{ ['--co' as string]: c.color }}
++            aria-current={isTurn ? 'step' : undefined}
++          >
+             <div className="company-top">
+               <CompanyDot companyId={p.companyId} size={14} />
+               <div className="company-name">
+-                <strong>{p.name}</strong>
+-                <span className="muted small">
+-                  {c.sector}
+-                  {p.isAI ? ' · AI' : isViewer ? ' · You' : ' · Human'}
++                <span className="company-title">
++                  <strong title={p.name}>{p.name}</strong>
++                  {isViewer && <YouTag />}
++                </span>
++                <span className="muted small company-sub">
++                  {isViewer ? (
++                    <>
++                      <span className="your-color">
++                        <i aria-hidden="true" />
++                        Your color
++                      </span>{' '}
++                      · {c.sector}
++                    </>
++                  ) : (
++                    <>
++                      {c.sector} ·{' '}
++                      {p.isAI ? (
++                        <span className="strategy-tag" title={profileOf(c.id).plan}>
++                          {profileOf(c.id).strategy}
++                        </span>
++                      ) : (
++                        'Human'
++                      )}
++                    </>
++                  )}
+                 </span>
+               </div>
+               <div className="vp" title={isViewer && sb.breakthroughs ? `Includes ${sb.breakthroughs} secret AI Breakthrough point(s)` : 'Public Compute Points'}>
++                {leader === p.id && <LeaderMark />}
+                 <b>{shown}</b>
+                 <span>CP</span>
+               </div>
+@@ -82,10 +134,24 @@ export function Scoreboard({ state, viewer }: { state: GameState; viewer: number
+               </span>
+             </div>
+             <div className="badges">
++              {thinking && (
++                <span className="badge thinking">
++                  {state.pendingTrade?.to === p.id ? 'Considering offer…' : !isTurn && state.phase === 'discard' ? 'Discarding…' : 'Taking its turn…'}
++                </span>
++              )}
++              {isTurn && !thinking && !p.isAI && <span className="badge turn">{isViewer ? 'Your turn' : 'Their turn'}</span>}
+               {state.longestRoadHolder === p.id && <span className="badge">Longest Network +2</span>}
+               {state.largestArmyHolder === p.id && <span className="badge">Priority Access +2</span>}
+-              {thinking && <span className="badge thinking">{state.pendingTrade?.to === p.id ? 'Considering offer…' : 'Thinking…'}</span>}
+-              {isTurn && !thinking && !p.isAI && <span className="badge turn">{isViewer ? 'Your turn' : 'Their turn'}</span>}
++              {hasFullStack(state, p.id) && (
++                <span className="badge fullstack" title="Full-Stack Integration unlocked: can deploy AI Factories directly onto open network sites">
++                  Full-Stack
++                </span>
++              )}
++              {leveraged > 0 && (
++                <span className="badge leveraged" title="Financed AI Factories still paying back their commitment (1 CP each until delivered)">
++                  Leveraged ×{leveraged}
++                </span>
++              )}
+             </div>
+           </article>
+         );
+diff --git a/src/ui/styles/identity.css b/src/ui/styles/identity.css
+index a6e0a89..88d5d8e 100644
+--- a/src/ui/styles/identity.css
++++ b/src/ui/styles/identity.css
+@@ -1 +1,587 @@
+ /* identity.css — owned by the identity work stream. Loaded after styles.css. */
++
++/* ---------- Shared identity marks ---------- */
++.you-tag {
++  display: inline-flex;
++  align-items: center;
++  flex: none;
++  padding: 1px 6px;
++  border-radius: 5px;
++  background: var(--co, var(--accent));
++  color: #04101f;
++  font-family: var(--display);
++  font-size: 10px;
++  font-weight: 700;
++  letter-spacing: 0.1em;
++  line-height: 1.45;
++  box-shadow: 0 0 10px color-mix(in srgb, var(--co, var(--accent)) 45%, transparent);
++}
++.you-tag.mini {
++  padding: 0 4px;
++  border-radius: 4px;
++  font-size: 8.5px;
++  letter-spacing: 0.08em;
++}
++.leader-mark {
++  flex: none;
++  color: #fbbf24;
++  filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.55));
++}
++.strategy-tag {
++  display: inline-block;
++  padding: 0 6px;
++  border-radius: 999px;
++  border: 1px solid color-mix(in srgb, var(--co, var(--muted)) 45%, transparent);
++  background: color-mix(in srgb, var(--co, var(--muted)) 10%, transparent);
++  color: color-mix(in srgb, var(--co, var(--text)) 65%, #ffffff);
++  font-size: 10.5px;
++  line-height: 1.5;
++  white-space: nowrap;
++}
++.your-color {
++  display: inline-flex;
++  align-items: center;
++  gap: 5px;
++  color: var(--text);
++}
++.your-color i {
++  display: inline-block;
++  width: 14px;
++  height: 8px;
++  border-radius: 3px;
++  background: var(--co);
++  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28);
++}
++
++/* ---------- Title: public concept line ---------- */
++.concept-line {
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  gap: 12px;
++  margin: 2px auto 16px;
++  max-width: 440px;
++}
++.concept-label {
++  font-size: 11.5px;
++  letter-spacing: 0.2em;
++  text-transform: uppercase;
++  color: #c5cee3;
++  white-space: nowrap;
++}
++.co-role {
++  color: color-mix(in srgb, var(--co) 70%, #ffffff);
++}
++
++/* ---------- New Game screen ---------- */
++.setup-card {
++  max-width: 720px;
++  text-align: left;
++  padding: 30px 36px 24px;
++}
++.setup-card .eyebrow {
++  text-align: center;
++}
++.setup-card .eyebrow em {
++  text-transform: none;
++}
++.setup-title {
++  font-size: clamp(26px, 4vw, 36px);
++  font-weight: 700;
++  text-align: center;
++  margin-bottom: 8px;
++}
++.setup-premise {
++  color: var(--muted);
++  text-align: center;
++  max-width: 580px;
++  margin: 0 auto 18px;
++  font-size: 14.5px;
++}
++.setup-section {
++  margin-top: 16px;
++}
++.setup-h {
++  font-size: 12px;
++  text-transform: uppercase;
++  letter-spacing: 0.14em;
++  color: #c5cee3;
++  margin-bottom: 8px;
++}
++.setup-h .muted {
++  font-family: var(--font);
++  font-weight: 400;
++  text-transform: none;
++  letter-spacing: 0;
++}
++.you-section {
++  padding: 14px;
++  border-radius: 14px;
++  border: 1px solid color-mix(in srgb, var(--co) 45%, transparent);
++  background: color-mix(in srgb, var(--co) 8%, rgba(15, 23, 42, 0.6));
++}
++.field-label {
++  display: block;
++  font-family: var(--display);
++  font-weight: 600;
++  font-size: 14px;
++  margin-bottom: 8px;
++}
++.name-row {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++}
++.name-input {
++  flex: 1;
++  min-width: 0;
++  font: inherit;
++  font-size: 18px;
++  font-weight: 600;
++  color: var(--text);
++  background: rgba(6, 10, 21, 0.85);
++  border: 1px solid var(--border-strong);
++  border-radius: 10px;
++  padding: 10px 12px;
++}
++.name-input::placeholder {
++  color: #5b6884;
++  font-weight: 400;
++}
++.name-input:focus {
++  outline: none;
++  border-color: var(--co, var(--accent));
++  box-shadow: 0 0 0 3px color-mix(in srgb, var(--co, var(--accent)) 30%, transparent);
++}
++.name-count {
++  flex: none;
++  font-size: 11px;
++  color: var(--muted);
++  font-variant-numeric: tabular-nums;
++}
++.field-hint {
++  margin: 8px 0 0;
++}
++.you-section .why {
++  margin: 8px 0 0;
++}
++.rival-cards {
++  display: grid;
++  grid-template-columns: repeat(3, minmax(0, 1fr));
++  gap: 8px;
++}
++.rival-card {
++  display: flex;
++  gap: 8px;
++  padding: 10px;
++  border-radius: 12px;
++  border: 1px solid var(--border);
++  border-top: 2px solid var(--co);
++  background: rgba(15, 23, 42, 0.6);
++}
++.rival-card .company-dot {
++  margin-top: 3px;
++}
++.rival-card > div {
++  display: flex;
++  flex-direction: column;
++  gap: 2px;
++  min-width: 0;
++}
++.rival-plan {
++  color: #c9d2e6;
++}
++.rules-pick {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 8px;
++}
++.rules-option {
++  position: relative;
++  display: flex;
++  flex-direction: column;
++  gap: 3px;
++  padding: 10px 12px;
++  border-radius: 12px;
++  border: 1px solid var(--border-strong);
++  background: rgba(15, 23, 42, 0.6);
++  cursor: pointer;
++  transition: border-color 0.15s ease, background 0.15s ease;
++}
++.rules-option:hover {
++  border-color: rgba(148, 163, 184, 0.5);
++}
++.rules-option input {
++  position: absolute;
++  opacity: 0;
++  pointer-events: none;
++}
++.rules-option.on {
++  border-color: var(--accent);
++  background: rgba(34, 211, 238, 0.08);
++  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.35);
++}
++.rules-option:has(input:focus-visible) {
++  outline: 2px solid var(--accent);
++  outline-offset: 2px;
++}
++.rules-option-head {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  flex-wrap: wrap;
++  margin-bottom: 2px;
++}
++.rules-option-head::before {
++  content: '';
++  width: 14px;
++  height: 14px;
++  flex: none;
++  border-radius: 50%;
++  border: 2px solid var(--border-strong);
++}
++.rules-option.on .rules-option-head::before {
++  border-color: var(--accent);
++  background: radial-gradient(circle, var(--accent) 0 3px, transparent 3.5px);
++}
++.rules-tag {
++  font-size: 9.5px;
++  padding: 1px 7px;
++  border-radius: 999px;
++  color: var(--accent);
++  border: 1px solid rgba(34, 211, 238, 0.45);
++  text-transform: uppercase;
++  letter-spacing: 0.08em;
++}
++.rules-line {
++  color: var(--muted);
++}
++.rules-line b {
++  color: #dbe3f0;
++  font-weight: 600;
++}
++.setup-actions {
++  display: flex;
++  gap: 10px;
++  justify-content: center;
++  align-items: stretch;
++  margin-top: 22px;
++}
++.btn.setup-start {
++  flex-direction: column;
++  gap: 2px;
++  min-width: 260px;
++}
++.setup-start .btn-sub {
++  max-width: 240px;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++/* ---------- Custom game ---------- */
++.seat {
++  flex-wrap: wrap;
++}
++.seat.human {
++  border-color: color-mix(in srgb, var(--co) 40%, transparent);
++}
++.seat-rename {
++  flex-basis: 100%;
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  padding-left: 24px;
++}
++.seat-rename .small {
++  flex: none;
++}
++.name-input.small-input {
++  font-size: 14px;
++  padding: 6px 10px;
++  border-radius: 8px;
++}
++.custom-rules {
++  display: grid;
++  gap: 6px;
++  margin-bottom: 12px;
++}
++
++/* ---------- Scoreboard ---------- */
++.company {
++  position: relative;
++}
++.company-title {
++  display: flex;
++  align-items: center;
++  gap: 6px;
++  min-width: 0;
++}
++.company-title strong {
++  min-width: 0;
++}
++.company-sub {
++  display: block;
++  white-space: nowrap;
++  overflow: hidden;
++  text-overflow: ellipsis;
++}
++.company.viewer {
++  border-color: color-mix(in srgb, var(--co) 45%, transparent);
++  background: linear-gradient(90deg, color-mix(in srgb, var(--co) 14%, transparent), rgba(10, 16, 32, 0.6) 75%);
++}
++.company.active {
++  border-color: var(--co);
++  box-shadow: 0 0 0 1px var(--co), 0 0 26px color-mix(in srgb, var(--co) 32%, transparent);
++  animation: turnGlow 2.4s ease-in-out infinite;
++}
++@keyframes turnGlow {
++  50% {
++    box-shadow: 0 0 0 1px var(--co), 0 0 14px color-mix(in srgb, var(--co) 18%, transparent);
++  }
++}
++.vp {
++  align-items: center;
++}
++.vp .leader-mark {
++  margin-right: 1px;
++}
++.badge.fullstack {
++  border-color: rgba(167, 139, 250, 0.55);
++  color: #c4b5fd;
++  background: rgba(167, 139, 250, 0.1);
++}
++.badge.leveraged {
++  border-color: rgba(244, 114, 182, 0.55);
++  color: #f9a8d4;
++  background: rgba(244, 114, 182, 0.1);
++}
++@media (max-height: 820px) {
++  .company-name .company-sub {
++    display: block;
++    font-size: 10.5px;
++  }
++}
++
++/* ---------- Top bar + instruction banner ---------- */
++.topbar-mid > .chip {
++  flex: none;
++}
++.topbar-mid > .chip.you-chip,
++.topbar-mid > .chip.turn-chip {
++  flex: 0 1 auto;
++  min-width: 0;
++}
++.chip.you-chip {
++  color: var(--text);
++  border-color: color-mix(in srgb, var(--co) 55%, transparent);
++  background: color-mix(in srgb, var(--co) 12%, rgba(15, 23, 42, 0.7));
++  max-width: 260px;
++}
++.you-chip-name,
++.turn-chip-name {
++  min-width: 0;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++  font-weight: 600;
++}
++.chip.turn-chip {
++  border-color: color-mix(in srgb, var(--co) 60%, transparent);
++  box-shadow: 0 0 14px color-mix(in srgb, var(--co) 22%, transparent);
++  max-width: 260px;
++}
++.turn-chip-label {
++  font-size: 9.5px;
++  text-transform: uppercase;
++  letter-spacing: 0.12em;
++  color: var(--muted);
++}
++@media (max-width: 1300px) {
++  .chip.you-chip,
++  .chip.turn-chip {
++    max-width: 190px;
++  }
++}
++.banner .company-dot {
++  margin-right: 8px;
++  vertical-align: -1px;
++}
++.banner.rival-turn {
++  border-color: color-mix(in srgb, var(--co) 70%, transparent);
++  box-shadow: 0 0 0 1px color-mix(in srgb, var(--co) 25%, transparent), 0 0 24px color-mix(in srgb, var(--co) 24%, transparent), 0 10px 30px rgba(0, 0, 0, 0.35);
++}
++.banner.rival-turn.alert {
++  border-color: rgba(248, 113, 113, 0.65);
++}
++
++/* ---------- Mobile chips + banner ---------- */
++.m-chip {
++  position: relative;
++}
++.m-chip-score {
++  display: flex;
++  align-items: center;
++  gap: 4px;
++  min-width: 0;
++}
++.m-chip.me {
++  border-color: color-mix(in srgb, var(--co) 60%, transparent);
++  background: color-mix(in srgb, var(--co) 15%, rgba(10, 16, 32, 0.75));
++}
++.m-chip.me .m-chip-name {
++  color: var(--text);
++}
++.m-chip.active {
++  box-shadow: 0 0 0 1.5px var(--co), 0 0 16px color-mix(in srgb, var(--co) 45%, transparent);
++}
++.m-chip.active::after {
++  content: '';
++  position: absolute;
++  top: 5px;
++  right: 5px;
++  width: 6px;
++  height: 6px;
++  border-radius: 50%;
++  background: var(--co);
++  box-shadow: 0 0 6px var(--co);
++  animation: pulse 1.2s ease-in-out infinite;
++}
++.m-banner > span .company-dot {
++  margin-right: 7px;
++  vertical-align: -1px;
++}
++.m-banner.rival-turn {
++  border-bottom-color: color-mix(in srgb, var(--co) 70%, transparent);
++  background: linear-gradient(90deg, color-mix(in srgb, var(--co) 18%, rgba(8, 13, 28, 0.88)), rgba(8, 13, 28, 0.88) 70%);
++}
++
++/* ---------- Intro + pass-and-play ---------- */
++.intro-you {
++  display: flex;
++  align-items: center;
++  gap: 14px;
++  padding: 12px 14px;
++  margin-bottom: 14px;
++  border-radius: 12px;
++  border: 1px solid color-mix(in srgb, var(--co) 50%, transparent);
++  background: color-mix(in srgb, var(--co) 10%, rgba(15, 23, 42, 0.6));
++}
++.intro-you > div {
++  display: flex;
++  flex-direction: column;
++  min-width: 0;
++}
++.intro-you-label {
++  font-size: 10.5px;
++  text-transform: uppercase;
++  letter-spacing: 0.14em;
++  color: var(--muted);
++}
++.intro-you-name {
++  font-family: var(--display);
++  font-size: 22px;
++  line-height: 1.2;
++  overflow-wrap: anywhere;
++}
++.intro-you-color {
++  color: var(--co);
++}
++.intro-you + .intro-lede {
++  font-size: 16px;
++}
++.intro-rivals {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: 6px;
++  margin: 6px 0 2px;
++}
++.intro-rival {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++  max-width: 100%;
++  padding: 3px 9px;
++  border-radius: 999px;
++  border: 1px solid color-mix(in srgb, var(--co) 40%, transparent);
++  background: rgba(15, 23, 42, 0.6);
++  font-size: 12px;
++}
++.intro-rival-name {
++  min-width: 0;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++.pass-color {
++  margin: 0;
++  color: var(--muted);
++}
++.pass-color b {
++  color: var(--co);
++}
++.pass .pass-card h1 {
++  overflow-wrap: anywhere;
++}
++
++/* ---------- Small screens ---------- */
++@media (max-width: 820px), (max-height: 520px) {
++  .concept-line {
++    gap: 8px;
++  }
++  .concept-label {
++    font-size: 10px;
++  }
++  .setup-card {
++    padding: 22px 14px 16px;
++  }
++  .setup-premise {
++    font-size: 13.5px;
++    margin-bottom: 12px;
++  }
++  .setup-section {
++    margin-top: 12px;
++  }
++  .you-section {
++    padding: 12px;
++  }
++  .name-input {
++    font-size: 17px;
++    min-height: 46px;
++  }
++  .rival-cards,
++  .rules-pick {
++    grid-template-columns: minmax(0, 1fr);
++  }
++  .rival-card {
++    padding: 8px 10px;
++  }
++  .rules-option {
++    min-height: 48px;
++  }
++  .setup-actions {
++    margin-top: 16px;
++  }
++  .setup-actions > .btn:not(.setup-start) {
++    min-height: 52px;
++  }
++  .btn.setup-start {
++    flex: 1;
++    min-width: 0;
++    min-height: 58px;
++  }
++  .setup-start .btn-sub {
++    max-width: 100%;
++  }
++  .seat-rename {
++    padding-left: 0;
++  }
++  .name-input.small-input {
++    min-height: 40px;
++    font-size: 16px;
++  }
++  .intro-you-name {
++    font-size: 19px;
++  }
++}
+diff --git a/src/ui/useGame.ts b/src/ui/useGame.ts
+index 71f7d68..9a47e5b 100644
+--- a/src/ui/useGame.ts
++++ b/src/ui/useGame.ts
+@@ -5,6 +5,7 @@ import { legalRoadEdges } from '../engine/rules';
+ import type { Action, GameState } from '../engine/types';
+ import { RESOURCES } from '../engine/types';
+ import { RESOURCE_INFO } from '../engine/constants';
++import { withCleanNames } from './companies';
+ 
+ const SAVE_KEY = 'settlers-of-compute:save:v1';
+ 
+@@ -21,8 +22,9 @@ export function loadSavedGame(): GameState | null {
+     const raw = localStorage.getItem(SAVE_KEY);
+     if (!raw) return null;
+     const s = JSON.parse(raw) as GameState;
+-    if (s.version !== 1 || !s.board || s.phase === 'gameOver') return null;
+-    return s;
++    if (s.version !== 1 || !s.board || !Array.isArray(s.players) || s.phase === 'gameOver') return null;
++    // Names are display-only; re-clean them so an edited save cannot break the layout.
++    return withCleanNames(s);
+   } catch {
+     return null;
+   }
+@@ -134,19 +136,24 @@ export function useGame() {
+           return;
+         }
+       }
++      // With several humans at one device, "you" is ambiguous: name the company instead.
++      const multiHuman = cur.players.filter((p) => !p.isAI).length > 1;
++      const name = cur.players[actor].name;
+       if (action.type === 'MOVE_DISRUPTION' && action.victim !== null && !cur.players[action.victim].isAI) {
+         const lost = RESOURCES.find((r) => next.players[action.victim!].resources[r] < cur.players[action.victim!].resources[r]);
+-        if (lost) pushToast(`${cur.players[actor].name} took 1 ${RESOURCE_INFO[lost].label} from you.`, 'error');
++        const from = multiHuman ? cur.players[action.victim].name : 'you';
++        if (lost) pushToast(`${name} took 1 ${RESOURCE_INFO[lost].label} from ${from}.`, 'error');
+       }
+       if (action.type === 'PLAY_CONSOLIDATION') {
+         for (const p of cur.players) {
+           const n = p.resources[action.resource];
+-          if (!p.isAI && p.id !== actor && n > 0) pushToast(`${cur.players[actor].name} consolidated ${RESOURCE_INFO[action.resource].label}: you handed over ${n}.`, 'error');
++          const who = multiHuman ? `${p.name} handed` : 'you handed';
++          if (!p.isAI && p.id !== actor && n > 0) pushToast(`${name} consolidated ${RESOURCE_INFO[action.resource].label}: ${who} over ${n}.`, 'error');
+         }
+       }
+       if (action.type === 'RESPOND_TRADE' && cur.pendingTrade && !cur.players[cur.pendingTrade.from].isAI) {
+-        const name = cur.players[actor].name;
+-        pushToast(`${name} ${action.accept ? 'accepted' : 'declined'}${action.reason ? ` — ${action.reason}` : '.'}`, action.accept ? 'success' : 'info');
++        const whose = multiHuman ? ` ${cur.players[cur.pendingTrade.from].name}'s offer` : '';
++        pushToast(`${name} ${action.accept ? 'accepted' : 'declined'}${whose}${action.reason ? ` — ${action.reason}` : '.'}`, action.accept ? 'success' : 'info');
+       }
+       setState(next);
+     }, delay);
+-- 
+2.43.0
+

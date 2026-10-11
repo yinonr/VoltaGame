@@ -1,0 +1,1001 @@
+From 4c071b82b2526e296aa8e9469ad10cd1341c7731 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 11 Oct 2026 05:16:27 +0000
+Subject: [PATCH] s2/polish: WIP snapshot (agent interrupted by session limit;
+ unverified)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01P9tr9NPSVt39359TmWrAhk
+---
+ src/engine/__tests__/trade-offers.test.ts |  75 ++++
+ src/engine/ai.ts                          |  32 +-
+ src/ui/Board.tsx                          | 139 ++++++--
+ src/ui/GameScreen.tsx                     |   5 +
+ src/ui/feedback.tsx                       | 409 ++++++++++++++++++++++
+ src/ui/panels.tsx                         | 104 ++++--
+ 6 files changed, 710 insertions(+), 54 deletions(-)
+ create mode 100644 src/engine/__tests__/trade-offers.test.ts
+ create mode 100644 src/ui/feedback.tsx
+
+diff --git a/src/engine/__tests__/trade-offers.test.ts b/src/engine/__tests__/trade-offers.test.ts
+new file mode 100644
+index 0000000..b1c30ac
+--- /dev/null
++++ b/src/engine/__tests__/trade-offers.test.ts
+@@ -0,0 +1,75 @@
++import { describe, expect, it } from 'vitest';
++import { decideAIAction, HUMAN_OFFER_EVERY_ROUNDS } from '../ai';
++import { productionPips } from '../evaluation';
++import { applyAction, createGame, DEFAULT_SEATS, getActingPlayer } from '../game';
++import { victoryPoints } from '../scoring';
++import type { GameState } from '../types';
++import { RESOURCES } from '../types';
++import { ALL_AI } from './helpers';
++
++// Interruption fatigue: every AI offer to a human opens a modal. AI rivals now approach a human
++// only on their offer rounds and only when the human is strictly the best partner; AI-to-AI
++// trading (and so every all-AI game, seeded test and the Quick Demo) is unchanged.
++
++/** Seat 0 is human; it plays like the AI but declines every offer made to it. */
++function humanDeclinesGame(seed: number) {
++  let s = createGame({ seed, seats: DEFAULT_SEATS });
++  const offers: { state: GameState; from: number }[] = [];
++  let steps = 0;
++  while (s.phase !== 'gameOver' && steps < 6000) {
++    const actor = getActingPlayer(s)!;
++    let action = decideAIAction(s, actor);
++    if (actor === 0 && s.pendingTrade?.to === 0) action = { type: 'RESPOND_TRADE', accept: false };
++    if (action.type === 'PROPOSE_TRADE' && action.to === 0) offers.push({ state: s, from: actor });
++    s = applyAction(s, action);
++    steps++;
++  }
++  return { s, offers };
++}
++
++function allAIFingerprint(seed: number) {
++  let s = createGame({ seed, seats: ALL_AI });
++  let steps = 0;
++  while (s.phase !== 'gameOver' && steps < 6000) {
++    s = applyAction(s, decideAIAction(s, getActingPlayer(s)!));
++    steps++;
++  }
++  return { turn: s.turn, winner: s.winner, cp: s.players.map((p) => victoryPoints(s, p.id)), steps, nextLogId: s.nextLogId, rng: s.rng };
++}
++
++describe('AI trade offers to humans', () => {
++  it('are rare: about 2 per game instead of about 11 (30 seeds)', () => {
++    // Measured before the change with the same driver and seeds 1–30: 326 offers (10.9 per game).
++    // After: 66 (2.2 per game). Assert a robust bound well clear of the old rate.
++    let total = 0;
++    for (let seed = 1; seed <= 30; seed++) {
++      const { s, offers } = humanDeclinesGame(seed);
++      expect(s.phase, `seed ${seed}`).toBe('gameOver');
++      total += offers.length;
++    }
++    expect(total).toBeLessThanOrEqual(100);
++    expect(total).toBeGreaterThan(0); // humans still get the occasional deal
++  });
++
++  it('come only on the proposer’s offer rounds, and only when the human is strictly the best partner', () => {
++    for (const seed of [4, 8, 9, 24, 29]) {
++      for (const { state, from } of humanDeclinesGame(seed).offers) {
++        const round = Math.floor((state.turn - 1) / state.players.length);
++        expect((round + from) % HUMAN_OFFER_EVERY_ROUNDS).toBe(0);
++        const action = decideAIAction(state, from);
++        if (action.type !== 'PROPOSE_TRADE') throw new Error('expected an offer');
++        const want = RESOURCES.find((r) => action.get[r] > 0)!;
++        const humanProd = productionPips(state, 0, true)[want];
++        for (const p of state.players) {
++          if (!p.isAI || p.id === from || victoryPoints(state, p.id, false) >= 8) continue;
++          expect(productionPips(state, p.id, true)[want]).toBeLessThan(humanProd);
++        }
++      }
++    }
++  });
++
++  it('leave all-AI games byte-for-byte unchanged (fingerprints recorded before the change)', () => {
++    expect(allAIFingerprint(55)).toEqual({ turn: 82, winner: 1, cp: [4, 11, 5, 7], steps: 366, nextLogId: 579, rng: 990226390 });
++    expect(allAIFingerprint(2024)).toEqual({ turn: 52, winner: 3, cp: [6, 8, 7, 11], steps: 243, nextLogId: 374, rng: -194961250 });
++  });
++});
+diff --git a/src/engine/ai.ts b/src/engine/ai.ts
+index ba520ba..4fd884f 100644
+--- a/src/engine/ai.ts
++++ b/src/engine/ai.ts
+@@ -399,12 +399,14 @@ function tradeTowards(state: GameState, player: number, goal: Goal): Action | nu
+         .map((p) => ({ id: p.id, prod: productionPips(state, p.id, true)[want] }))
+         .filter((c) => c.prod > 0)
+         .sort((a, b) => b.prod - a.prod || a.id - b.id);
+-      if (candidates.length > 0) {
++      // Humans answer offers in a modal, so they are approached sparingly (AI-to-AI choice unchanged).
++      const to = offerPartner(state, player, candidates);
++      if (to !== null) {
+         const give = bundle();
+         give[giveR] = surplus[giveR] >= 3 && state.players[player].resources[giveR] >= 3 ? 2 : 1;
+         const get = bundle();
+         get[want] = 1;
+-        return { type: 'PROPOSE_TRADE', to: candidates[0].id, give, get };
++        return { type: 'PROPOSE_TRADE', to, give, get };
+       }
+     }
+   }
+@@ -485,3 +487,29 @@ export function decideAIAction(state: GameState, player: number): Action {
+       return { type: 'END_TURN' };
+   }
+ }
++
++// ---------------------------------------------------------------------------
++// Offer pacing (interruption fatigue)
++// ---------------------------------------------------------------------------
++
++/** An AI may approach a human with an offer on one of every this-many of its rounds. */
++export const HUMAN_OFFER_EVERY_ROUNDS = 3;
++
++/**
++ * Who an AI sends its one direct offer of the turn to, from rivals ranked best partner first.
++ * Every offer to a human opens a modal, so humans are approached sparingly: only on this AI's
++ * offer rounds (staggered by seat so the AIs take turns) and only when the human strictly out-
++ * produces every AI partner for the wanted resource. Otherwise the AI asks its best AI partner,
++ * or makes no offer. Stateless and deterministic. Whenever the top-ranked rival is an AI (always,
++ * in all-AI games) the choice is exactly the old one, so AI-to-AI play is unchanged.
++ */
++function offerPartner(state: GameState, player: number, ranked: { id: number; prod: number }[]): number | null {
++  const best = ranked[0];
++  if (!best) return null;
++  if (state.players[best.id].isAI) return best.id;
++  const bestAI = ranked.find((c) => state.players[c.id].isAI) ?? null;
++  const round = Math.floor((state.turn - 1) / state.players.length);
++  const offerRound = (round + player) % HUMAN_OFFER_EVERY_ROUNDS === 0;
++  if (offerRound && (bestAI === null || best.prod > bestAI.prod)) return best.id;
++  return bestAI ? bestAI.id : null;
++}
+diff --git a/src/ui/Board.tsx b/src/ui/Board.tsx
+index d8018b1..200a368 100644
+--- a/src/ui/Board.tsx
++++ b/src/ui/Board.tsx
+@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
+ import type { GameState, TileType } from '../engine/types';
+ import { BARREN_INFO, RESOURCE_INFO, companyById, pips } from '../engine/constants';
+ import { outputMultiplier } from '../engine/financing';
++import { useFreshBuilds, useRollFlash } from './feedback';
+ import { ResourceGlyph } from './icons';
+ 
+ const S = 64; // pixels per unit hex radius
+@@ -30,6 +31,8 @@ interface BoardProps {
+   touch?: boolean;
+   /** Spot selected (touch) and awaiting confirmation. */
+   selected?: BoardTarget | null;
++  /** The player looking at the board: their payout chips stand out. */
++  viewer?: number | null;
+ }
+ 
+ function hexPoints(cx: number, cy: number, r: number): string {
+@@ -71,7 +74,7 @@ export function FactoryShape({ x, y, color, stroke, scale = 1, ghost = false }:
+   );
+ }
+ 
+-export function Board({ state, highlightVertices, highlightEdges, highlightTiles, ghost, ghostColor, onVertex, onEdge, onTile, tileMode, touch = false, selected = null }: BoardProps) {
++export function Board({ state, highlightVertices, highlightEdges, highlightTiles, ghost, ghostColor, onVertex, onEdge, onTile, tileMode, touch = false, selected = null, viewer = null }: BoardProps) {
+   const { board } = state;
+   const [hoverV, setHoverV] = useState<number | null>(null);
+   const [hoverE, setHoverE] = useState<number | null>(null);
+@@ -88,8 +91,11 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
+   }, [board]);
+ 
+   const playerColor = (p: number) => companyById(state.players[p].companyId);
+-  const report = state.lastProduction;
+-  const prodKey = `${state.turn}-${state.lastRoll?.total ?? 0}-${state.log.length}`;
++  // The latest roll stays lit for a moment even after the roller ends its turn.
++  const flash = useRollFlash(state);
++  const report = flash?.report ?? null;
++  const prodKey = `roll-${flash?.seq ?? 0}`;
++  const fresh = useFreshBuilds(state);
+ 
+   return (
+     <svg className="board" viewBox={viewBox} role="img" aria-label="Settlers of Compute board">
+@@ -124,6 +130,7 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
+       {/* backdrop plate */}
+       <circle cx={0} cy={0} r={S * 5.4} fill="url(#sea)" />
+       <polygon points={hexPoints(0, 0, S * 4.75)} transform="rotate(30)" className="board-plate" />
++      {flash?.roll.total === 7 && <polygon key={`seven-${flash.seq}`} points={hexPoints(0, 0, S * 4.75)} transform="rotate(30)" className="plate-seven" pointerEvents="none" />}
+ 
+       {/* ports */}
+       {board.ports.map((port) => {
+@@ -157,7 +164,8 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
+         const cx = tile.x * S;
+         const cy = tile.y * S;
+         const c = tileColors(tile.type);
+-        const producing = report && report.tileIds.includes(tile.id) && report.blockedTileId !== tile.id;
++        const producing = !!report && report.tileIds.includes(tile.id) && report.blockedTileId !== tile.id;
++        const blocked = !!report && report.blockedTileId === tile.id;
+         const hot = tile.number === 6 || tile.number === 8;
+         const label = tile.type === 'barren' ? BARREN_INFO.label : RESOURCE_INFO[tile.type].label;
+         return (
+@@ -165,20 +173,39 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
+             <title>{`${label}${tile.number ? ` · produces on ${tile.number} (${pips(tile.number)}/36)` : ''}`}</title>
+             <polygon points={hexPoints(cx, cy, S * 0.97)} fill={`url(#tile-${tile.type})`} stroke={c.color} strokeOpacity={0.55} strokeWidth={1.5} />
+             <polygon points={hexPoints(cx, cy, S * 0.82)} fill="none" stroke={c.color} strokeOpacity={0.18} strokeWidth={1} />
+-            {producing && <polygon key={prodKey} points={hexPoints(cx, cy, S * 0.95)} className="tile-produce" style={{ stroke: c.color }} />}
++            {producing && (
++              <g key={prodKey} className="tile-lit" pointerEvents="none" style={{ ['--res' as string]: c.color }}>
++                <polygon points={hexPoints(cx, cy, S * 0.95)} className="tile-lit-fill" />
++                <polygon points={hexPoints(cx, cy, S * 0.95)} className="tile-produce" style={{ stroke: c.color }} />
++              </g>
++            )}
+             <g transform={`translate(${cx - 13},${cy - 33}) scale(1.08)`} opacity={0.95}>
+               <ResourceGlyph type={tile.type} color={c.color} />
+             </g>
+             {tile.number !== null && (
+               <g transform={`translate(${cx},${cy + 12})`}>
+-                <circle r={17} className={`token${hot ? ' hot' : ''}`} />
+-                <text y={4} textAnchor="middle" className={`token-num${hot ? ' hot' : ''}`}>
+-                  {tile.number}
+-                </text>
+-                <g transform="translate(0,11)">
+-                  {Array.from({ length: pips(tile.number) }).map((_, i, arr) => (
+-                    <circle key={i} cx={(i - (arr.length - 1) / 2) * 3.6} cy={0} r={1.15} className={`pip${hot ? ' hot' : ''}`} />
+-                  ))}
++                <g key={producing ? prodKey : 'token'} className={producing ? 'token-pulse' : undefined} style={producing ? { ['--res' as string]: c.color } : undefined}>
++                  {producing && <circle r={17} className="token-halo" />}
++                  <circle r={17} className={`token${hot ? ' hot' : ''}`} />
++                  <text y={4} textAnchor="middle" className={`token-num${hot ? ' hot' : ''}`}>
++                    {tile.number}
++                  </text>
++                  <g transform="translate(0,11)">
++                    {Array.from({ length: pips(tile.number) }).map((_, i, arr) => (
++                      <circle key={i} cx={(i - (arr.length - 1) / 2) * 3.6} cy={0} r={1.15} className={`pip${hot ? ' hot' : ''}`} />
++                    ))}
++                  </g>
++                </g>
++              </g>
++            )}
++            {blocked && (
++              <g key={prodKey} className="tile-blocked" pointerEvents="none">
++                <polygon points={hexPoints(cx, cy, S * 0.95)} className="tile-blocked-fill" />
++                <g transform={`translate(${cx},${cy - 2})`}>
++                  <rect x={-34} y={-11} width={68} height={22} rx={11} className="tile-blocked-pill" />
++                  <text y={4.5} textAnchor="middle" className="tile-blocked-text">
++                    BLOCKED
++                  </text>
+                 </g>
+               </g>
+             )}
+@@ -197,7 +224,7 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
+         const cx = tile.x * S;
+         const cy = tile.y * S;
+         return (
+-          <g className="outage" pointerEvents="none">
++          <g key={`outage-${state.disruptionTile}`} className="outage" pointerEvents="none">
+             <polygon points={hexPoints(cx, cy, S * 0.95)} fill="url(#outage-hatch)" />
+             <g transform={`translate(${cx},${cy - 22})`}>
+               <circle r={15} className="outage-ring" />
+@@ -225,7 +252,6 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
+         const y2 = a.y + (b.y - a.y) * 0.84;
+         return (
+           <g key={`road-${e.id}`} className="road">
+-            <line x1={x1 * S} y1={y1 * S} x2={x2 * S} y2={y2 * S} stroke={co.color} strokeWidth={18} strokeLinecap="round" className="fresh-road" />
+             <line x1={x1 * S} y1={y1 * S} x2={x2 * S} y2={y2 * S} stroke={co.stroke} strokeWidth={11} strokeLinecap="round" />
+             <line x1={x1 * S} y1={y1 * S} x2={x2 * S} y2={y2 * S} stroke={co.color} strokeWidth={6.5} strokeLinecap="round" />
+           </g>
+@@ -262,15 +288,38 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
+         );
+       })}
+ 
++      {/* fresh connections: a glow drawn along the new road */}
++      {[...fresh.edges].map(([id, p]) => {
++        const owner = state.roads[id];
++        if (owner === null) return null;
++        const e = board.edges[id];
++        const a = board.vertices[e.a];
++        const b = board.vertices[e.b];
++        return (
++          <line
++            key={`rp-${id}-${p.seq}`}
++            x1={(a.x + (b.x - a.x) * 0.16) * S}
++            y1={(a.y + (b.y - a.y) * 0.16) * S}
++            x2={(a.x + (b.x - a.x) * 0.84) * S}
++            y2={(a.y + (b.y - a.y) * 0.84) * S}
++            pathLength={1}
++            className="road-pulse"
++            style={{ stroke: playerColor(owner).color }}
++            pointerEvents="none"
++          />
++        );
++      })}
++
+       {/* buildings */}
+       {state.buildings.map((bld, v) => {
+         if (!bld) return null;
+         const vx = board.vertices[v].x * S;
+         const vy = board.vertices[v].y * S;
+         const co = playerColor(bld.owner);
++        // One group per building. Per-building badges (e.g. a financing marker) belong in this
++        // group after the shape, at the piece's top-right corner (vx + 13, vy - 13).
+         return (
+-          <g key={`b-${v}-${bld.kind}`}>
+-            <circle cx={vx} cy={vy} r={14} className="fresh-ring" style={{ stroke: co.color }} />
++          <g key={`b-${v}-${bld.kind}`} className={`building ${bld.kind}`}>
+             {bld.kind === 'cluster' ? (
+               <ClusterShape x={vx} y={vy} color={co.color} stroke={co.stroke} />
+             ) : (
+@@ -280,6 +329,34 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
+         );
+       })}
+ 
++      {/* build pulses: rings, and the Compute Points the piece just earned */}
++      {[...fresh.vertices].map(([v, p]) => {
++        const bld = state.buildings[v];
++        if (!bld) return null;
++        const vx = board.vertices[v].x * S;
++        const vy = board.vertices[v].y * S;
++        return (
++          <g
++            key={`bp-${v}-${p.seq}`}
++            className={`build-pulse${bld.owner === viewer ? ' mine' : ''}`}
++            transform={`translate(${vx},${vy})`}
++            style={{ ['--co' as string]: playerColor(bld.owner).color }}
++            pointerEvents="none"
++          >
++            <circle r={16} className="build-ring" />
++            <circle r={16} className="build-ring late" />
++            {p.cp > 0 && (
++              <g className="build-cp">
++                <rect x={-23} y={-43} width={46} height={19} rx={9.5} />
++                <text y={-29.5} textAnchor="middle">
++                  +{p.cp} CP
++                </text>
++              </g>
++            )}
++          </g>
++        );
++      })}
++
+       {/* vertex highlights */}
+       {board.vertices.map((vert) => {
+         if (!highlightVertices.has(vert.id)) return null;
+@@ -336,26 +413,30 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
+           .flatMap((t) => {
+             const tile = board.tiles[t];
+             if (tile.type === 'barren') return [];
++            // Payouts are read from the buildings as they stood at the roll.
++            const buildings = flash!.buildings;
+             return tile.vertexIds
+-              .filter((v) => state.buildings[v])
++              .filter((v) => buildings[v])
+               .map((v, i) => {
+-                const bld = state.buildings[v]!;
++                const bld = buildings[v]!;
+                 const vert = board.vertices[v];
+                 const n = outputMultiplier(bld);
+                 const res = tile.type as Exclude<TileType, 'barren'>;
+                 const short = report.shortages.includes(res);
++                const mine = viewer !== null && bld.owner === viewer;
+                 // Float the chip just above the producing building (buildings are 2+ steps apart,
+-                // so chips never collide).
+-                const ox = 0;
+-                const oy = -24;
++                // so chips never collide). The viewer's own chips are larger and ringed in their color.
+                 return (
+-                  <g key={`${prodKey}-${t}-${v}-${i}`} className="payout" transform={`translate(${vert.x * S + ox},${vert.y * S + oy})`} pointerEvents="none">
+-                    <rect x={-20} y={-12} width={40} height={22} rx={11} fill="#0b1020" stroke={RESOURCE_INFO[res].color} strokeWidth={1.5} />
+-                    <text x={-6} y={4} textAnchor="middle" className="payout-text" fill={RESOURCE_INFO[res].color}>
+-                      {short ? '✕' : `+${n}`}
+-                    </text>
+-                    <g transform="translate(3,-7) scale(0.55)">
+-                      <ResourceGlyph type={res} color={RESOURCE_INFO[res].color} />
++                  <g key={`${prodKey}-${t}-${v}-${i}`} transform={`translate(${vert.x * S},${vert.y * S - (mine ? 28 : 24)})`} pointerEvents="none">
++                    <g className={`payout${mine ? ' mine' : ''}${short ? ' short' : ''}`} style={{ ['--co' as string]: playerColor(bld.owner).color }}>
++                      {mine && <rect x={-24} y={-15} width={48} height={28} rx={14} className="payout-ring" />}
++                      <rect x={-20} y={-12} width={40} height={22} rx={11} fill="#0b1020" stroke={RESOURCE_INFO[res].color} strokeWidth={1.5} />
++                      <text x={-6} y={4} textAnchor="middle" className="payout-text" fill={RESOURCE_INFO[res].color}>
++                        {short ? '✕' : `+${n}`}
++                      </text>
++                      <g transform="translate(3,-7) scale(0.55)">
++                        <ResourceGlyph type={res} color={RESOURCE_INFO[res].color} />
++                      </g>
+                     </g>
+                   </g>
+                 );
+diff --git a/src/ui/GameScreen.tsx b/src/ui/GameScreen.tsx
+index 7b0a93b..04ff1b7 100644
+--- a/src/ui/GameScreen.tsx
++++ b/src/ui/GameScreen.tsx
+@@ -29,6 +29,7 @@ import {
+ } from './modals';
+ import { BuildPanel, CardsPanel, CompanyDot, DiceDisplay, EventLog, FlashCount, HandPanel, Scoreboard } from './panels';
+ import { BottomSheet, COMPACT_QUERY, useMediaQuery, ZOOM_LEVELS, ZoomableBoard } from './mobile';
++import { FeedbackLayer, GainBubbles } from './feedback';
+ import { ResourceIcon } from './icons';
+ import { scoreBreakdown } from '../engine/scoring';
+ import { RESOURCES } from '../engine/types';
+@@ -266,6 +267,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
+       tileMode={state.phase === 'moveDisruption' ? 'disrupt' : null}
+       touch={compact}
+       selected={pending}
++      viewer={viewer}
+     />
+   );
+ 
+@@ -391,6 +393,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
+               </div>
+             </div>
+           )}
++          <FeedbackLayer state={state} viewer={viewer} speed={speed} pushToast={pushToast} />
+         </div>
+ 
+         <div className="m-dock">
+@@ -432,6 +435,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
+                 <span>{RESOURCE_INFO[r].label}</span>
+               </div>
+             ))}
++            <GainBubbles state={state} player={viewerPlayer.id} />
+           </div>
+         )}
+ 
+@@ -562,6 +566,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
+           {instruction(state, viewer, mode)}
+         </div>
+         {boardEl}
++        <FeedbackLayer state={state} viewer={viewer} speed={speed} pushToast={pushToast} />
+         <p className="disclaimer-inline">Unofficial, Catan-inspired creative prototype. Not affiliated with or endorsed by Volta or Catan rights holders.</p>
+       </main>
+ 
+diff --git a/src/ui/feedback.tsx b/src/ui/feedback.tsx
+new file mode 100644
+index 0000000..4107ac6
+--- /dev/null
++++ b/src/ui/feedback.tsx
+@@ -0,0 +1,409 @@
++import { useCallback, useEffect, useRef, useState } from 'react';
++import { RESOURCE_INFO, VP_TO_WIN, companyById, resourceLabel, sumBundle } from '../engine/constants';
++import { isFinanced } from '../engine/financing';
++import { hasFullStack } from '../engine/fullstack';
++import { scoreBreakdown } from '../engine/scoring';
++import type { Building, DiceRoll, GameState, ProductionReport, ResourceBundle } from '../engine/types';
++import { RESOURCES } from '../engine/types';
++import { ResourceIcon } from './icons';
++import type { Speed, Toast } from './useGame';
++
++// Game-feel feedback: what just happened, shown for a moment and then gone. Everything here is
++// derived from consecutive game states (never stored in them), animated with CSS only, and
++// non-blocking. Timers are UI-only; the engine stays deterministic.
++
++export const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
++
++export function prefersReducedMotion(): boolean {
++  return typeof window !== 'undefined' && !!window.matchMedia?.(REDUCED_MOTION_QUERY).matches;
++}
++
++/** How long a roll's board highlights, payout chips and gain ribbons stay up. */
++export const ROLL_FLASH_MS = 3200;
++/** How long a build pulse stays mounted. */
++const BUILD_PULSE_MS = 1900;
++
++/**
++ * Fire-and-forget UI timers. They are deliberately not cancelled on unmount: they only clear
++ * transient state (a no-op once unmounted), and StrictMode's rehearsal unmount would otherwise
++ * cancel them and leave a highlight on screen.
++ */
++function later(fn: () => void, ms: number): void {
++  window.setTimeout(fn, ms);
++}
++
++// ---------------------------------------------------------------------------
++// Roll flash: the latest roll and what it produced, kept up for a moment even after
++// the turn moves on (an AI often ends its turn well before the payout animation is over).
++// ---------------------------------------------------------------------------
++
++export interface RollFlash {
++  /** Increments per roll; use it in React keys so CSS animations restart. */
++  seq: number;
++  roll: DiceRoll;
++  /** What the roll produced; null on a 7. */
++  report: ProductionReport | null;
++  /** Buildings as they stood at the roll (payout amounts are read from these). */
++  buildings: (Building | null)[];
++}
++
++export function useRollFlash(state: GameState, ms = ROLL_FLASH_MS): RollFlash | null {
++  const [flash, setFlash] = useState<RollFlash | null>(null);
++  const seen = useRef<DiceRoll | null>(null);
++  const seq = useRef(0);
++  const roll = state.lastRoll;
++  useEffect(() => {
++    // lastRoll is a fresh object per ROLL and is shared by reference until END_TURN clears it.
++    // Only a new roll matters; the rest of the state is read at that moment on purpose.
++    if (!roll || roll === seen.current) return;
++    seen.current = roll;
++    const id = ++seq.current;
++    setFlash({ seq: id, roll, report: state.lastProduction, buildings: state.buildings });
++    later(() => setFlash((f) => (f?.seq === id ? null : f)), ms);
++  }, [roll]); // eslint-disable-line react-hooks/exhaustive-deps
++  return flash;
++}
++
++export interface GainFlash {
++  seq: number;
++  gains: ResourceBundle;
++}
++
++/** What `player` collected on the latest roll (anyone's roll), while the roll flash is up. */
++export function useGainFlash(state: GameState, player: number): GainFlash | null {
++  const flash = useRollFlash(state);
++  const gains = flash?.report?.gains[player];
++  if (!flash || !gains || sumBundle(gains) === 0) return null;
++  return { seq: flash.seq, gains };
++}
++
++/** "+2 GPUs  +1 Power": the viewer's haul from the latest roll, next to their hand. */
++export function GainRibbon({ gain }: { gain: GainFlash | null }) {
++  if (!gain) return null;
++  return (
++    <div key={gain.seq} className="gain-ribbon" role="status">
++      {RESOURCES.filter((r) => gain.gains[r] > 0).map((r) => (
++        <span key={r} style={{ ['--res' as string]: RESOURCE_INFO[r].color }}>
++          <ResourceIcon type={r} size={13} />+{gain.gains[r]} {resourceLabel(r, gain.gains[r])}
++        </span>
++      ))}
++    </div>
++  );
++}
++
++/** Per-resource "+N" bubbles laid over a five-column hand bar (the phone layout's hand). */
++export function GainBubbles({ state, player }: { state: GameState; player: number }) {
++  const gain = useGainFlash(state, player);
++  if (!gain) return null;
++  const text = RESOURCES.filter((r) => gain.gains[r] > 0)
++    .map((r) => `+${gain.gains[r]} ${resourceLabel(r, gain.gains[r])}`)
++    .join(', ');
++  return (
++    <div key={gain.seq} className="gain-bubbles">
++      <span className="sr-only" role="status">
++        You collected {text}.
++      </span>
++      {RESOURCES.map((r) => (
++        <span key={r} aria-hidden="true" className={gain.gains[r] > 0 ? 'on' : ''} style={{ ['--res' as string]: RESOURCE_INFO[r].color }}>
++          {gain.gains[r] > 0 ? <b>+{gain.gains[r]}</b> : null}
++        </span>
++      ))}
++    </div>
++  );
++}
++
++// ---------------------------------------------------------------------------
++// Build pulses: which pieces just appeared on the board
++// ---------------------------------------------------------------------------
++
++export interface FreshPiece {
++  seq: number;
++  /** Compute Points the change was worth (0 for a financed upgrade). */
++  cp: number;
++}
++
++export interface FreshBuilds {
++  vertices: Map<number, FreshPiece>;
++  edges: Map<number, FreshPiece>;
++}
++
++const NO_FRESH: FreshBuilds = { vertices: new Map(), edges: new Map() };
++
++/** CP a building is worth on the board. */
++function buildingCp(b: Building | null | undefined): number {
++  if (!b) return 0;
++  if (b.kind === 'cluster' || isFinanced(b)) return 1;
++  return 2;
++}
++
++/**
++ * Pieces placed or upgraded since the previous state, kept for a short pulse. Nothing pulses
++ * on the first render or when a different game is loaded, so only real builds light up.
++ */
++export function useFreshBuilds(state: GameState): FreshBuilds {
++  const [fresh, setFresh] = useState<FreshBuilds>(NO_FRESH);
++  const prev = useRef<GameState | null>(null);
++  const seq = useRef(0);
++  useEffect(() => {
++    const before = prev.current;
++    prev.current = state;
++    if (!before || before === state) return;
++    if (!isSameGame(before, state)) {
++      setFresh(NO_FRESH);
++      return;
++    }
++    const id = ++seq.current;
++    const vertices = new Map<number, FreshPiece>();
++    const edges = new Map<number, FreshPiece>();
++    state.buildings.forEach((b, v) => {
++      const old = before.buildings[v];
++      if (!b || b === old) return;
++      // Same piece written anew (e.g. a financed factory delivering a unit) is not a build,
++      // unless it just became a full factory.
++      const gained = buildingCp(b) - (old && old.owner === b.owner ? buildingCp(old) : 0);
++      if (old && old.kind === b.kind && gained <= 0) return;
++      vertices.set(v, { seq: id, cp: Math.max(0, gained) });
++    });
++    state.roads.forEach((owner, e) => {
++      if (owner !== null && before.roads[e] === null) edges.set(e, { seq: id, cp: 0 });
++    });
++    if (vertices.size === 0 && edges.size === 0) return;
++    setFresh((f) => ({
++      vertices: new Map([...f.vertices, ...vertices]),
++      edges: new Map([...f.edges, ...edges]),
++    }));
++    later(() => {
++      setFresh((f) => ({
++        vertices: new Map([...f.vertices].filter(([, p]) => p.seq !== id)),
++        edges: new Map([...f.edges].filter(([, p]) => p.seq !== id)),
++      }));
++    }, BUILD_PULSE_MS);
++  }, [state]);
++  return fresh;
++}
++
++/** False when `after` is a different game (new game, restarted demo, loaded save). */
++function isSameGame(before: GameState, after: GameState): boolean {
++  return (
++    before.seed === after.seed &&
++    before.players.length === after.players.length &&
++    before.buildings.length === after.buildings.length &&
++    after.nextLogId >= before.nextLogId
++  );
++}
++
++// ---------------------------------------------------------------------------
++// Notable moments: success toasts for the viewer's own milestones, and a rate-limited,
++// coalesced ticker of rivals' notable actions. Derived from state diffs plus new log entries.
++// ---------------------------------------------------------------------------
++
++interface Moment {
++  /** Company the moment is about (null = market-wide). */
++  player: number | null;
++  text: string;
++  /** 0 = filler … 3 = victory threat (the only kind shown at Turbo speed). */
++  priority: number;
++}
++
++/** Notable things that happened between two states of the same game. Pure. */
++export function notableMoments(before: GameState, after: GameState, viewer: number | null): Moment[] {
++  const out: Moment[] = [];
++  after.buildings.forEach((b, v) => {
++    const old = before.buildings[v];
++    if (!b || b === old || b.kind !== 'factory') return;
++    if (!old) {
++      out.push({ player: b.owner, text: 'deployed an AI Factory on a new site (+2 CP)', priority: 2 });
++    } else if (old.kind === 'cluster') {
++      if (isFinanced(b)) out.push({ player: b.owner, text: `financed an AI Factory (${b.financed} units committed)`, priority: 1 });
++      else out.push({ player: b.owner, text: 'opened an AI Factory (+1 CP, double output)', priority: 2 });
++    } else if (isFinanced(old) && !isFinanced(b)) {
++      out.push({ player: b.owner, text: 'paid off a financed AI Factory: full output (+1 CP)', priority: 2 });
++    }
++  });
++  const holder = (h: number | null, prior: number | null, title: string) => {
++    if (h === prior) return;
++    const from = prior === null ? '' : prior === viewer ? ' from you' : ` from ${after.players[prior].name}`;
++    if (h !== null) out.push({ player: h, text: `took ${title}${from} (+2 CP)`, priority: prior === viewer && prior !== null ? 3 : 2 });
++    else if (prior !== null) out.push({ player: prior, text: `lost ${title}`, priority: 1 });
++  };
++  holder(after.longestRoadHolder, before.longestRoadHolder, 'Longest Network');
++  holder(after.largestArmyHolder, before.largestArmyHolder, 'Priority Access');
++  after.players.forEach((p) => {
++    if (hasFullStack(after, p.id) && !hasFullStack(before, p.id)) {
++      out.push({ player: p.id, text: 'unlocked Full-Stack Integration', priority: 2 });
++    }
++  });
++  // Market events speak for themselves: show the first new one.
++  const event = after.log.find((e) => e.kind === 'event' && e.id >= before.nextLogId);
++  if (event) out.push({ player: null, text: event.text, priority: 2 });
++  // Victory threats, from public information only (secret Breakthroughs may make it closer still).
++  after.players.forEach((p) => {
++    if (after.phase === 'gameOver') return;
++    const now = scoreBreakdown(after, p.id).publicTotal;
++    const was = scoreBreakdown(before, p.id).publicTotal;
++    if (now < VP_TO_WIN - 2 || now <= was) return;
++    out.push({
++      player: p.id,
++      text: now >= VP_TO_WIN ? `reached ${now} CP and wins at the start of its turn` : `is ${VP_TO_WIN - now} CP from winning`,
++      priority: 3,
++    });
++  });
++  return out;
++}
++
++/** Toast text for the viewer's own moments (null = not worth a toast). */
++function ownToast(before: GameState, after: GameState, viewer: number): string[] {
++  const out: string[] = [];
++  after.buildings.forEach((b, v) => {
++    const old = before.buildings[v];
++    if (!b || b === old || b.owner !== viewer) return;
++    if (!old) out.push(b.kind === 'cluster' ? '+1 CP — Compute Cluster online' : '+2 CP — AI Factory deployed, double output');
++    else if (old.kind === 'cluster' && b.kind === 'factory') {
++      out.push(isFinanced(b) ? `AI Factory financed — full output once ${b.financed} committed units are delivered` : '+1 CP — AI Factory online, double output');
++    } else if (isFinanced(old) && !isFinanced(b)) out.push('+1 CP — financing paid off, AI Factory at full output');
++  });
++  if (after.longestRoadHolder === viewer && before.longestRoadHolder !== viewer) out.push('+2 CP — Longest Network is yours');
++  if (after.largestArmyHolder === viewer && before.largestArmyHolder !== viewer) out.push('+2 CP — Priority Access is yours');
++  if (hasFullStack(after, viewer) && !hasFullStack(before, viewer)) out.push('Full-Stack Integration unlocked — Integrated Deployment is open to you');
++  return out;
++}
++
++interface Notice {
++  id: number;
++  player: number | null;
++  parts: string[];
++  priority: number;
++}
++
++/** Minimum gap between two rival notices. */
++const NOTICE_GAP_MS = 1500;
++/** How long a notice stays up. */
++const NOTICE_SHOW_MS = 3800;
++/** Notices waiting beyond this are dropped, lowest value first. */
++const MAX_QUEUED = 3;
++
++/**
++ * Mount once per layout, inside a positioned container (the ticker floats in its top-left).
++ * Pushes success toasts for the viewer's own milestones and shows a quiet, coalesced ticker
++ * of rivals' notable actions: at most one new notice every 1.5 s, at most two on screen,
++ * low-value ones dropped when busy, and only victory threats at Turbo speed. Never blocks.
++ */
++export function FeedbackLayer({
++  state,
++  viewer,
++  speed,
++  pushToast,
++}: {
++  state: GameState;
++  viewer: number | null;
++  speed: Speed;
++  pushToast: (text: string, kind?: Toast['kind']) => void;
++}) {
++  const prev = useRef<GameState | null>(null);
++  const queue = useRef<Notice[]>([]);
++  const nextId = useRef(1);
++  const lastShown = useRef(-Infinity);
++  const pumping = useRef(false);
++  const speedRef = useRef(speed);
++  speedRef.current = speed;
++  const [shown, setShown] = useState<Notice[]>([]);
++
++  const pump = useCallback(() => {
++    if (pumping.current) return;
++    const wait = lastShown.current + NOTICE_GAP_MS - performance.now();
++    if (wait > 0) {
++      pumping.current = true;
++      later(() => {
++        pumping.current = false;
++        pump();
++      }, wait);
++      return;
++    }
++    const next = queue.current.shift();
++    if (!next) return;
++    lastShown.current = performance.now();
++    setShown((s) => [...s.slice(-1), next]);
++    later(() => setShown((s) => s.filter((n) => n.id !== next.id)), NOTICE_SHOW_MS);
++    if (queue.current.length > 0) pump();
++  }, []);
++
++  useEffect(() => {
++    const before = prev.current;
++    prev.current = state;
++    if (!before || before === state) return;
++    if (!isSameGame(before, state)) {
++      queue.current = [];
++      setShown([]);
++      return;
++    }
++    if (viewer !== null) for (const text of ownToast(before, state, viewer)) pushToast(text, 'success');
++    if (state.phase === 'gameOver') {
++      queue.current = [];
++      return;
++    }
++    for (const m of notableMoments(before, state, viewer)) {
++      if (m.player !== null && m.player === viewer) continue; // the viewer's own moments are toasts
++      if (speedRef.current === 'turbo' && m.priority < 3) continue;
++      const text = m.text;
++      const q = queue.current;
++      const same = m.player !== null ? q.find((n) => n.player === m.player) : undefined;
++      if (same) {
++        if (!same.parts.includes(text)) same.parts.push(text);
++        same.priority = Math.max(same.priority, m.priority);
++        continue;
++      }
++      q.push({ id: nextId.current++, player: m.player, parts: [text], priority: m.priority });
++      while (q.length > MAX_QUEUED) {
++        let drop = 0;
++        q.forEach((n, i) => {
++          if (n.priority < q[drop].priority) drop = i;
++        });
++        q.splice(drop, 1);
++      }
++    }
++    pump();
++  }, [state, viewer, pushToast, pump]);
++
++  if (shown.length === 0) return null;
++  return (
++    <div className="rival-feed" aria-live="polite">
++      {shown.map((n) => {
++        const p = n.player !== null ? state.players[n.player] : null;
++        const co = p ? companyById(p.companyId) : null;
++        return (
++          <div key={n.id} className={`rival-notice${n.priority >= 3 ? ' threat' : ''}`} style={co ? { ['--co' as string]: co.color } : undefined}>
++            <i className="rival-notice-mark" aria-hidden="true" />
++            <span>
++              <b>{p ? p.name : 'Market'}</b> {n.parts.join(' · ')}
++            </span>
++          </div>
++        );
++      })}
++    </div>
++  );
++}
++
++// ---------------------------------------------------------------------------
++// Count-up (victory screen)
++// ---------------------------------------------------------------------------
++
++/** Counts from 0 to `target` over `ms` (instantly when the player prefers reduced motion). */
++export function useCountUp(target: number, ms = 1100): number {
++  const [n, setN] = useState(() => (prefersReducedMotion() ? target : 0));
++  useEffect(() => {
++    if (prefersReducedMotion()) {
++      setN(target);
++      return;
++    }
++    let raf = 0;
++    const start = performance.now();
++    const tick = (t: number) => {
++      const k = Math.min(1, (t - start) / ms);
++      setN(Math.round(target * (1 - Math.pow(1 - k, 3))));
++      if (k < 1) raf = requestAnimationFrame(tick);
++    };
++    raf = requestAnimationFrame(tick);
++    return () => cancelAnimationFrame(raf);
++  }, [target, ms]);
++  return n;
++}
+diff --git a/src/ui/panels.tsx b/src/ui/panels.tsx
+index ad46eca..f489b12 100644
+--- a/src/ui/panels.tsx
++++ b/src/ui/panels.tsx
+@@ -5,9 +5,10 @@ import { BUILD_LABELS, COSTS, DEV_CARD_INFO, RESOURCE_INFO, VP_TO_WIN, companyBy
+ import { getActingPlayer } from '../engine/game';
+ import { checkBuild, checkPlayCard, piecesLeft } from '../engine/rules';
+ import { longestNetwork, scoreBreakdown } from '../engine/scoring';
+-import type { DevCardType, GameState, LogEntry } from '../engine/types';
++import type { DevCardType, DiceRoll, GameState, LogEntry } from '../engine/types';
+ import { RESOURCES } from '../engine/types';
+ import { ClusterShape, FactoryShape } from './Board';
++import { GainRibbon, prefersReducedMotion, useGainFlash } from './feedback';
+ import { DieFace, ResourceChip, ResourceIcon } from './icons';
+ 
+ function PieceGlyph({ kind, color, stroke }: { kind: 'cluster' | 'factory'; color: string; stroke: string }) {
+@@ -123,24 +124,65 @@ export function EventLog({ state }: { state: GameState }) {
+ // Dice + turn
+ // ---------------------------------------------------------------------------
+ 
++/** How long the dice tumble before they settle (the board lights up as they land). */
++const TUMBLE_MS = 640;
++const TUMBLE_STEP_MS = 80;
++
+ export function DiceDisplay({ state }: { state: GameState }) {
+-  const roll = state.lastRoll;
+-  const [rolling, setRolling] = useState(false);
+-  const lastKey = useRef<string>('');
+-  const key = roll ? `${state.turn}-${roll.d1}-${roll.d2}` : '';
++  // The last roll stays on the table (dimmed) after the turn ends, until the next roll.
++  const [shown, setShown] = useState<{ roll: DiceRoll; seq: number } | null>(() => (state.lastRoll ? { roll: state.lastRoll, seq: 0 } : null));
++  const [tumble, setTumble] = useState(0); // > 0 while tumbling: the face-shuffle step
++  const seen = useRef<DiceRoll | null>(state.lastRoll);
++  const seq = useRef(0);
++  const live = state.lastRoll;
+   useEffect(() => {
+-    if (key && key !== lastKey.current) {
+-      lastKey.current = key;
+-      setRolling(true);
+-      const t = window.setTimeout(() => setRolling(false), 550);
+-      return () => window.clearTimeout(t);
+-    }
+-  }, [key]);
++    if (!live || live === seen.current) return;
++    seen.current = live;
++    const id = ++seq.current;
++    setShown({ roll: live, seq: id });
++    if (prefersReducedMotion()) return;
++    // Shuffle the faces while the dice tumble, then settle on the real roll. UI-only timers.
++    let step = 1;
++    setTumble(step);
++    const timer = window.setInterval(() => {
++      step++;
++      if (step * TUMBLE_STEP_MS >= TUMBLE_MS || seq.current !== id) {
++        window.clearInterval(timer);
++        if (seq.current === id) setTumble(0);
++        return;
++      }
++      setTumble(step);
++    }, TUMBLE_STEP_MS);
++  }, [live]);
++  const roll = shown?.roll ?? null;
++  const rolling = tumble > 0;
++  const stale = !!roll && live === null;
++  const seven = roll?.total === 7;
++  const fresh = !!shown && shown.seq > 0 && !stale;
++  const face = (d: number, k: number) => (rolling ? ((d + tumble * k) % 6) + 1 : d);
+   return (
+-    <div className={`dice${roll?.total === 7 ? ' seven' : ''}`}>
+-      <DieFace value={roll?.d1 ?? 6} rolling={rolling} idle={!roll} />
+-      <DieFace value={roll?.d2 ?? 6} rolling={rolling} idle={!roll} />
+-      <div className="dice-total">{roll ? <b className={rolling ? 'pop' : ''}>{roll.total}</b> : <span className="muted">—</span>}</div>
++    <div
++      className={`dice${seven ? ' seven' : ''}${rolling ? ' tumbling' : ''}${stale ? ' stale' : ''}${fresh && !rolling ? ' landed' : ''}`}
++      title={stale ? `Last roll: ${roll!.total}` : undefined}
++      aria-label={roll ? `${stale ? 'Last roll' : 'Rolled'} ${roll.total} (${roll.d1} + ${roll.d2})${seven ? ': Grid Disruption' : ''}` : 'Dice not rolled yet'}
++      role="img"
++    >
++      <DieFace value={roll ? face(roll.d1, 5) : 6} rolling={rolling} idle={!roll} />
++      <DieFace value={roll ? face(roll.d2, 3) : 6} rolling={rolling} idle={!roll} />
++      <div className="dice-total">
++        {roll ? (
++          <b key={`${shown!.seq}-${rolling}`} className={rolling ? 'pending' : fresh ? 'pop' : ''}>
++            {rolling ? '·' : roll.total}
++          </b>
++        ) : (
++          <span className="muted">—</span>
++        )}
++      </div>
++      {seven && !rolling && !stale && (
++        <span key={shown!.seq} className="dice-alert">
++          Grid Disruption
++        </span>
++      )}
+     </div>
+   );
+ }
+@@ -166,20 +208,36 @@ export function FlashCount({ value }: { value: number }) {
+ export function HandPanel({ state, player }: { state: GameState; player: number }) {
+   const p = state.players[player];
+   const total = sumBundle(p.resources);
++  // What the latest roll (anyone's) paid this company: a ribbon plus a "+N" on each card.
++  const gain = useGainFlash(state, player);
+   return (
+     <section className="panel hand" aria-label="Your resources">
+       <header className="panel-head">
+         <h2>Resources</h2>
+         <span className={`muted small${total > 7 ? ' warn' : ''}`}>{total} in hand{total > 7 ? ' · over limit on a 7' : ''}</span>
++        <GainRibbon gain={gain} />
+       </header>
+       <div className="hand-grid">
+-        {RESOURCES.map((r) => (
+-          <div key={r} className={`hand-card${p.resources[r] === 0 ? ' empty' : ''}`} style={{ ['--res' as string]: RESOURCE_INFO[r].color }} title={RESOURCE_INFO[r].blurb}>
+-            <ResourceIcon type={r} size={26} />
+-            <FlashCount value={p.resources[r]} />
+-            <span className="hand-label">{RESOURCE_INFO[r].label}</span>
+-          </div>
+-        ))}
++        {RESOURCES.map((r) => {
++          const got = gain?.gains[r] ?? 0;
++          return (
++            <div
++              key={r}
++              className={`hand-card${p.resources[r] === 0 ? ' empty' : ''}`}
++              style={{ ['--res' as string]: RESOURCE_INFO[r].color }}
++              title={RESOURCE_INFO[r].blurb}
++            >
++              {got > 0 && (
++                <span key={gain!.seq} className="hand-gain" aria-hidden="true">
++                  +{got}
++                </span>
++              )}
++              <ResourceIcon type={r} size={26} />
++              <FlashCount value={p.resources[r]} />
++              <span className="hand-label">{RESOURCE_INFO[r].label}</span>
++            </div>
++          );
++        })}
+       </div>
+       <div className="supply muted small" title="Market supply left for each resource">
+         Market supply:{' '}
+-- 
+2.43.0
+
