@@ -92,16 +92,17 @@ export function rulesOf(state: Pick<GameState, 'rules'>): RuleOptions {
 
 /**
  * Upfront cost of a financed AI Factory upgrade (vs. COSTS.factory = 3 Capital + 2 GPUs).
- * Tuned by simulation (docs/BALANCE.md): at 2 GPUs alone a company that never financed won only
- * ~10% of games (fair share 25%); a 1-Capital stake plus a 4-unit commitment brings it to ~21-23%.
+ * Tuned by simulation (docs/BALANCE.md): with 2 GPUs and 3 units a company that never financed
+ * won only ~10% of games (fair share 25%); 1 Capital + 2 GPUs with a 5-unit commitment brings it
+ * to ~23% over 1,200 games while games stay ~1.3 rounds shorter than Classic.
  */
 export const FINANCING_COST: ResourceBundle = bundle({ capital: 1, gpu: 2 });
 /** Committed bonus units a new financed factory owes before it becomes a full AI Factory. */
-export const FINANCING_COMMITMENT = 4;
+export const FINANCING_COMMITMENT = 5;
 /** Most financed factories one company may have outstanding at once (experimental cap). */
 export const FINANCING_MAX_OUTSTANDING = 2;
 /** Hard ceiling on any one commitment, even after market events extend it. */
-export const FINANCING_MAX_COMMITMENT = 5;
+export const FINANCING_MAX_COMMITMENT = 6;
 
 // ---------------------------------------------------------------------------
 // Full-Stack Integration (earned status, rules.fullStack)

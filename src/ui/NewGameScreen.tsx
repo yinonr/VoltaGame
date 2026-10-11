@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { MAX_COMPANY_NAME, VP_TO_WIN } from '../engine/constants';
+import { FINANCING_COST, MAX_COMPANY_NAME, VP_TO_WIN, describeBundle } from '../engine/constants';
 import type { RuleOptions } from '../engine/types';
 import type { RulesChoice } from './companies';
 import { DEFAULT_COMPANY_NAME, HUMAN_COMPANY, RIVALS, cleanCompanyName, profileOf, rivalNamed, rulesFor } from './companies';
@@ -27,7 +27,7 @@ const RULES_OPTIONS: { id: RulesChoice; title: string; tag?: string; lines: [str
     title: 'Settlers of Compute',
     tag: 'Recommended',
     lines: [
-      ['Infrastructure Financing', 'upgrade now for 2 GPUs, repay from production.'],
+      ['Infrastructure Financing', `upgrade now for ${describeBundle(FINANCING_COST)}, repay from production.`],
       ['Full-Stack Integration', 'build across the stack to deploy AI Factories directly.'],
     ],
   },
