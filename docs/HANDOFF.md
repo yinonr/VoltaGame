@@ -1,15 +1,76 @@
 # Handoff — Settlers of Compute
 
-_Last updated: 2026-10-11, Session 3 final sprint (Grid Stability). Interview: Monday, October 12, 2026._
+_Last updated: 2026-10-11, Session 4 (release sprint). Interview: Monday, October 12, 2026._
 
-> **Final sprint update.** **Grid Stability** is now part of the Settlers of Compute rules. Classic is unchanged.
->
-> - **What it does:** after a Grid Disruption the next 6 rolls are protected (a 7 causes no discard, theft or outage move), and an outage blocks its hex for 4 rolls, then expires.
-> - **Effect** (600 games): natural disruptions −55%, thefts −52%, discards −35%. A hex is offline on 35% of rolls instead of about 90%. Games are about 1.5 rounds shorter. Financing is unchanged (debt-free seat 22.5%).
-> - **Verification:** an independent QA agent tested five personas in headless Chromium. All its findings were fixed and rechecked: the High was End turn clipped on phones after a calm 7; the Mediums were a false "stalled" badge and a stale OUTAGE marker.
-> - **Results:** 180 tests pass; both builds pass. The release candidate is the latest commit of `claude/new-session-6i54u3`.
-> - **The previous candidate** `cb38388` is tagged locally as `rc-session3-cb38388`; that tag was not pushed.
-> - **Docs:** `docs/STRATEGIC_SYSTEMS.md` → Grid Stability, `docs/BALANCE.md`, and `docs/INNOVATION_CARDS.md` (temporary card designs for the next session).
+## Session 4: release sprint (read this first)
+
+**Release candidate:** branch **`claude/zealous-ramanujan-enewnb`**, latest commit (`git log -1 origin/claude/zealous-ramanujan-enewnb`).
+
+- The branch contains all of `claude/new-session-6i54u3` (`a93e986`) plus the Session 4 fixes.
+- `main` (`37c229b`, the live Session 1 build) is an ancestor, so publishing is a plain fast-forward.
+- **Not merged or deployed.** That waits for the owner's approval. The steps, smoke test and rehearsed rollback are in **`docs/RELEASE.md`**.
+
+**Recommendation: GO, ready for owner approval** after the owner's own iPhone check. No known Blocker or High issues remain.
+
+### What changed (UI, copy, config and tests only; the rules engine is untouched, so Classic is unchanged)
+
+| Area | Change |
+| --- | --- |
+| Setup | Rules sit right under the company name. On phones the two rule sets show side by side with a one-line blurb, so Classic is visible without scrolling, even on an iPhone SE. |
+| Intro | Four concrete steps: what you start with, how a roll pays out, what building scores, and the rule set. On short phones the **Play** button stays pinned on screen. |
+| Phone game screen | Your own player chip is wider. The grid chips (Grid vulnerable, Stabilizing, Outage) explain themselves on tap; their tooltips never showed on touch. The roll note fits three lines. The Build sheet keeps its Financing and Full-Stack headings. The copy says "Tap", not "Click". Disabled zoom buttons are opaque. |
+| Results | On phones the action row stays pinned. No late toasts over the headline. The Factories column reads "2 + 1 financed · 5 CP" (or "—"). Winning from inside the Build sheet closes the sheet. |
+| Activity log | Newest turn first, with each "Turn N" heading above its own events (before, every heading sat below its turn). |
+| Discard dialog | The + buttons stop at the required number. |
+| Safari | No long-press text selection or callouts on the board. No input under 16px, so focusing a field never zooms the page. |
+| Sharing | Open Graph and Twitter tags plus a 1200×630 `og-image.jpg`, so the link previews with the board, "A concept for Volta" and the not-affiliated line. Also an `apple-touch-icon.png`. |
+| Copy | How to play no longer says an outage lasts until the marker moves; that is Classic only. The README covers Grid Stability. |
+| Tests | `release-intersections.test.ts`: an Integrated Deployment win at exactly 10 CP (and no win at 9), and Financing repayment during Grid Stability, including a calm 7. `log-order.test.ts`: Activity grouping, including a real AI game. |
+| Docs | `docs/RELEASE.md`: confirm, merge, deploy, verify, smoke test, and a rollback rehearsed in a scratch clone. |
+
+### Evidence (actual results)
+
+- `npm test`: **185 passed**, 5 opt-in skipped. `tsc -b`, `npm run build` and `npm run build:branded` all pass.
+- **CI:** green on every Session 4 push except `35925ae`, whose new test file failed typecheck (`tsc -b`). The next commit, `fe4f1b6`, fixed it; check that the final commit is green in Actions.
+- **Engine simulation:** 4,500 games on fresh seeds (`SIM_SEED=70000`), covering Classic, Compute and Compute + beta cards with 2, 3 and 4 players. Every game was decided, with **0 stalls, 0 illegal AI actions and 0 invariant violations** (resource conservation and state immutability checked after every action).
+- **UI, emulated (headless Chromium with iPhone touch emulation, not real Safari):**
+  - Complete games driven only by taps and clicks reached the results screen, with no console errors and no horizontal overflow, at 390×664 (an iPhone 14's visible Safari area), 375×548 (an iPhone SE in Safari), 844×340 (landscape) and 1440×900.
+  - Classic was played at 375×548.
+  - Saved-game fixtures covered financing, refinance-to-win, Grid Stability chips, cards and discard.
+  - Reloading mid-game, including during an AI turn, resumes the same game. A corrupt save falls back to the title.
+  - Normal-speed AI rounds take about 7–9 s.
+- **Independent QA agent** (one, report-only): first-time-player run on phone, landscape and desktop. It found 0 Blockers and 0 Highs. Its three Mediums (Activity order, touch-only tooltips, clipped roll note) and three of its Lows are fixed. Its verdict: a first-time player can pick the game up on an iPhone.
+- **Production audit:**
+  - No credentials or secrets in the source or the bundle.
+  - No source maps or `localhost` references.
+  - The public bundle has no "Brought to you by Volta" (`VOLTA_BRANDING` is off in CI).
+  - Assets resolve under `/VoltaGame/`.
+  - The deploy workflow is unchanged and its last run on `main` succeeded.
+- **Not done:** a physical iPhone, real Safari, or human-vs-human play.
+
+### Remaining risks
+
+| Category | Item |
+| --- | --- |
+| Release blockers | None known. |
+| Owner check (real iPhone) | Does Safari's collapsing toolbar ever hide the tab bar or Roll / End turn? Is panning comfortable at 2.2×? Are corner and edge targets easy at fit zoom (the QA agent found diagonal edges usable but fiddly)? Do link previews show up in iMessage? |
+| Acceptable limitations | Rival names abbreviate in phone chips ("Stacks…"; more in iPhone SE landscape). The results table scrolls sideways on phones. After a Network Connection is built, placement mode stays on if you can afford another. Grid chips can cover a hub label. Theft results show in Activity, not in a toast. |
+| Post-launch | AI rarely uses Integrated Deployment. Stacksmith is the weakest rival. Classic still labels the Dead Zone marker "OUTAGE" at the start (Classic display left as is). The Full-Stack "Four resource types" line lists every touched type under 4 / 4. `recovery/` (656 KB) is still in the repo. |
+
+### Owner decision (optional)
+
+The public title screen's eyebrow reads "An unofficial strategy prototype". It is accurate but modest, and "prototype" also appears in the disclaimer. A possible replacement is "A Catan-inspired strategy game". It was left alone because it is branding copy.
+
+### Post-launch backlog (do not start before Monday)
+
+1. Fixes from the owner's iPhone check, if any.
+2. A light "built" confirmation, then leave placement mode, for touch road building.
+3. Move the grid chips off hub labels, and show a toast for thefts against you.
+4. The roadmap below: Innovation Cards, market events, onboarding hints, then online multiplayer. A 10- vs 12-CP study is deferred.
+
+---
+
+# Session 3 handoff (history)
 
 ## Status in one paragraph
 
@@ -30,8 +91,9 @@ On the latest commit: **163 tests pass** and 4 opt-in simulations are skipped; t
 | Branch | Commit | What it is |
 | --- | --- | --- |
 | `main` | `37c229b` | Live at https://yinonr.github.io/VoltaGame/ (Session 1 build). Untouched. |
-| `claude/volta-branding` | `db08323` | Session 1 feature branch. Untouched; fully contained in the session branch. |
-| **`claude/new-session-6i54u3`** | latest pushed (`git log -1 origin/claude/new-session-6i54u3`) | **The release candidate.** A fast-forward of `main`. |
+| `claude/volta-branding` | `db08323` | Session 1 feature branch. Untouched; fully contained in the session branches. |
+| `claude/new-session-6i54u3` | `a93e986` | Session 3 release candidate. Fully contained in the Session 4 branch. |
+| **`claude/zealous-ramanujan-enewnb`** | latest pushed | **Session 4 release candidate** (see the top of this file). A fast-forward of `main`. |
 | `s2/*` (7 branches) | local only | Session 2 agent branches, preserved in `recovery/` as a bundle plus patches. `recovery/README.md` explains how to restore them and what was integrated. |
 
 ## What works (verified)
@@ -84,27 +146,7 @@ On the latest commit: **163 tests pass** and 4 opt-in simulations are skipped; t
 
 ## Publish (owner action, needs approval)
 
-`main` is an ancestor of the session branch, so this is a plain fast-forward.
-
-1. On GitHub, open a pull request from `claude/new-session-6i54u3` into `main` and review the changes. You can also skip the PR and merge locally:
-
-   ```bash
-   git fetch origin
-   git checkout main
-   git merge --ff-only origin/claude/new-session-6i54u3
-   git push origin main
-   ```
-
-2. Merging to `main` runs **Deploy to GitHub Pages** (`deploy.yml`: `npm ci`, `npm test`, `npm run build`, then upload). It takes about 1–2 minutes; watch the Actions tab until it's green.
-3. Open https://yinonr.github.io/VoltaGame/ with a hard refresh, on desktop and on your phone. Check:
-   - the title shows **"A concept for Volta"**;
-   - New Game asks for your company name;
-   - "Settlers of Compute" is preselected;
-   - the Build panel shows "AI Factory · financed" once you have a cluster and the resources.
-4. **Optional cleanup before merging:** delete `recovery/` (about 0.3 MB of backup artifacts) if you don't want it on `main`. It's harmless either way.
-5. **Rollback:** revert the merge on `main` (GitHub "Revert" on the PR, or `git revert`), which redeploys the previous build. Visitors' autosaves stay loadable either way.
-
-Players see a New Game setup (name, rivals, rules). The default game uses Infrastructure Financing and Full-Stack Integration, Classic is one click away, and the gameplay feedback is livelier. Old in-progress saves continue as Classic games.
+Superseded by **`docs/RELEASE.md`**, which publishes `claude/zealous-ramanujan-enewnb`. Don't use the Session 3 steps that were here. They named the older branch, and their `git revert` rollback fails on this history because it contains merge commits.
 
 ## Known issues and risks
 

@@ -1,6 +1,6 @@
 # Settlers of Compute — Context for the next session
 
-_Snapshot: end of Session 3 (including the Grid Stability sprint), 2026-10-11. Paste this into a new chat, or point a new Claude Code session at `docs/CONTEXT.md`, then `docs/HANDOFF.md`._
+_Snapshot: end of Session 4 (release sprint), 2026-10-11. Paste this into a new chat, or point a new Claude Code session at `docs/CONTEXT.md`, then `docs/HANDOFF.md`._
 
 ## What this is
 
@@ -25,11 +25,11 @@ _Snapshot: end of Session 3 (including the Grid Stability sprint), 2026-10-11. P
 | --- | --- |
 | Repo | https://github.com/yinonr/VoltaGame (public) |
 | Live site | https://yinonr.github.io/VoltaGame/. Serves `main` at `37c229b` (the Session 1 build). A push to `main` redeploys automatically. |
-| **Release candidate** | **`claude/new-session-6i54u3`**: latest commit `be3b958`, last code commit `a29547e`. CI green. It is a fast-forward of `main`. **Not merged: the owner must approve.** |
-| Earlier release candidate | `cb38388`, before Grid Stability. Tagged locally only (`rc-session3-cb38388`). |
+| **Release candidate** | **`claude/zealous-ramanujan-enewnb`** (latest commit). It contains `claude/new-session-6i54u3` (`a93e986`) plus the Session 4 release fixes. It is a fast-forward of `main`. **Not merged: the owner must approve.** Steps are in `docs/RELEASE.md`. |
+| Session 3 candidate | `claude/new-session-6i54u3` at `a93e986`, superseded |
 | Private preview | https://claude.ai/artifact/4m8Ye6ByLftYBJL25Tq3Yw: the owner-only Grid Stability build, for phone playtesting |
 | Recovery | `recovery/`: a bundle plus patches of the 7 Session 2 agent branches. Only `s2/events` (market events) is not integrated. |
-| Tests | `npm test`: 180 passed, 5 opt-in skipped. Typecheck, `npm run build` and `npm run build:branded` pass. |
+| Tests | `npm test`: 185 passed, 5 opt-in skipped. Typecheck, `npm run build` and `npm run build:branded` pass. |
 
 ## Game rules
 
@@ -117,7 +117,8 @@ A pure, deterministic engine with seeded RNG. `applyAction` is the only way stat
 | `STRATEGIC_SYSTEMS.md` | Final rules |
 | `BALANCE.md` | Simulation evidence |
 | `INNOVATION_CARDS.md` | Next card designs |
-| `HANDOFF.md` | Status and publish steps |
+| `HANDOFF.md` | Status, evidence, risks (Session 4 section first) |
+| `RELEASE.md` | Publish, verify, smoke-test and rollback steps |
 | `MULTIPLAYER_PLAN.md` | Online plan, with the new state to synchronize |
 | `FULLSTACK_CALIBRATION.md` | Full-Stack calibration |
 | `GAME_DESIGN.md` | Game design |
@@ -144,11 +145,7 @@ A pure, deterministic engine with seeded RNG. `applyAction` is the only way stat
 
 ## Next steps (in order)
 
-1. **Owner playtest, then publish.**
-   - Playtest the private preview on an iPhone, the first test on real Safari.
-   - If it's good, fast-forward `main`: `git fetch origin && git checkout main && git merge --ff-only origin/claude/new-session-6i54u3 && git push origin main`.
-   - Pages redeploys in about 2 minutes. Check that the title says "A concept for Volta" and that New Game lists Grid Stability.
-   - Roll back by reverting the merge.
+1. **Owner iPhone check, then publish.** Follow `docs/RELEASE.md`: confirm the commit, fast-forward `main`, watch the Pages deploy, smoke-test, and roll back if needed with the rehearsed tree restore (not `git revert`). Fix only what the iPhone check finds.
 2. **Innovation Cards** (`docs/INNOVATION_CARDS.md`), added to the Compute deck only:
    1. prototype **GPU Optimization** (next AI Factory build this turn costs 1 GPU less);
    2. then **Nuclear Power Plant** (end the current outage now);
@@ -165,9 +162,7 @@ A pure, deterministic engine with seeded RNG. `applyAction` is the only way stat
 - **Testing:**
   - Not tested on a physical iPhone or in Safari; only headless Chromium at 4 phone sizes and desktop.
   - No human-vs-human playtests.
-- **Phone layout:**
-  - The setup screen needs a scroll to reach the Classic option.
-  - Long custom names truncate in the phone chips.
+- **Phone layout:** rival names abbreviate in phone chips; the results table scrolls sideways. (Session 4 made Classic visible on setup without scrolling.)
 - **AI and balance:**
   - The AI rarely uses Integrated Deployment (about 0.4 per game).
   - Stacksmith is the weakest rival (about 15–18% wins).
