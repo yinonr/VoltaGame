@@ -4,7 +4,7 @@ import type { SeatConfig } from '../engine/game';
 import { RESOURCES } from '../engine/types';
 import { ResourceIcon } from './icons';
 import { CompanyDot } from './panels';
-import { RulesModal } from './modals';
+import { AboutModal, RulesModal } from './modals';
 
 export interface CustomOptions {
   seats: SeatConfig[];
@@ -29,6 +29,7 @@ export function TitleScreen({
 }) {
   const [custom, setCustom] = useState(false);
   const [rules, setRules] = useState(false);
+  const [about, setAbout] = useState(false);
   const [seatModes, setSeatModes] = useState<SeatMode[]>(['human', 'ai', 'ai', 'ai']);
   const [quickStart, setQuickStart] = useState(true);
   const [seedText, setSeedText] = useState('');
@@ -85,6 +86,9 @@ export function TitleScreen({
               </button>
               <button className="btn" onClick={() => setRules(true)}>
                 How to play
+              </button>
+              <button className="btn" onClick={() => setAbout(true)}>
+                About
               </button>
             </div>
           </div>
@@ -174,6 +178,7 @@ export function TitleScreen({
         </p>
       </div>
       {rules && <RulesModal onClose={() => setRules(false)} />}
+      {about && <AboutModal onClose={() => setAbout(false)} />}
     </div>
   );
 }

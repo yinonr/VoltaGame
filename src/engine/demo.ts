@@ -12,12 +12,13 @@ import { RESOURCES } from './types';
 // seat 0 to the human right after their roll, with a curated hand that creates a
 // meaningful choice: build a cluster now, or trade for a GPU and build an AI Factory.
 
-export const DEMO_SEED = 20261012;
+// Chosen by an offline search over seeds 1–400 for a tight four-way race (everyone at 3–4 CP in round 7).
+export const DEMO_SEED = 392;
 
 /** The human's hand at the start of the demo. */
 export const DEMO_HAND: ResourceBundle = bundle({ power: 1, networking: 1, land: 1, capital: 3, gpu: 1 });
 
-function setHand(s: GameState, player: number, hand: ResourceBundle): boolean {
+export function setHand(s: GameState, player: number, hand: ResourceBundle): boolean {
   const p = s.players[player];
   const bank = { ...s.bank };
   for (const r of RESOURCES) bank[r] += p.resources[r];
@@ -28,7 +29,7 @@ function setHand(s: GameState, player: number, hand: ResourceBundle): boolean {
   return true;
 }
 
-function simulateToHumanTurn(seed: number): GameState | null {
+export function simulateToHumanTurn(seed: number): GameState | null {
   const seats = DEFAULT_SEATS.map((seat) => ({ ...seat, isAI: true }));
   let s = createGame({ seed, seats });
   let steps = 0;
@@ -44,7 +45,7 @@ function simulateToHumanTurn(seed: number): GameState | null {
   return null;
 }
 
-function meetsCriteria(s: GameState): boolean {
+export function meetsCriteria(s: GameState): boolean {
   const vps = s.players.map((p) => victoryPoints(s, p.id, true));
   const pub = s.players.map((p) => victoryPoints(s, p.id, false));
   if (vps[0] < 4 || vps[0] > 6) return false;

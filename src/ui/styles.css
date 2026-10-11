@@ -847,6 +847,45 @@ kbd {
 }
 .hit {
   cursor: pointer;
+  outline: none;
+}
+.hit:focus-visible .vertex-hl,
+.hit:focus-visible .edge-hl,
+.hit:focus-visible .tile-hl {
+  stroke: var(--accent);
+  stroke-opacity: 1;
+}
+.fresh-ring {
+  fill: none;
+  stroke-width: 3;
+  opacity: 0;
+  animation: freshRing 1.6s ease-out 1;
+  transform-box: fill-box;
+  transform-origin: center;
+  pointer-events: none;
+}
+@keyframes freshRing {
+  0% {
+    opacity: 0.95;
+    transform: scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+.fresh-road {
+  opacity: 0;
+  animation: freshRoad 1.6s ease-out 1;
+  pointer-events: none;
+}
+@keyframes freshRoad {
+  0% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 .vertex-hl {
   fill: rgba(255, 255, 255, 0.22);
@@ -1296,6 +1335,9 @@ kbd {
   padding-left: 18px;
   color: #c9d2e6;
 }
+.offer-context {
+  margin: 0 0 10px;
+}
 .offer {
   display: flex;
   align-items: center;
@@ -1454,12 +1496,74 @@ kbd {
 }
 
 /* ---------- Responsive fallbacks (desktop-first) ---------- */
-@media (max-width: 1280px) {
+@media (max-width: 1300px) {
   .game {
-    grid-template-columns: 260px minmax(0, 1fr) 320px;
+    grid-template-columns: 268px minmax(0, 1fr) 328px;
   }
   .topbar-right .btn.small {
     padding: 5px 8px;
+  }
+  .left-count {
+    display: none;
+  }
+  .scoreboard .panel-head .muted {
+    font-size: 11px;
+  }
+}
+/* Short laptop screens (e.g. 1280×720 when screen-sharing): tighten vertical rhythm. */
+@media (max-height: 820px) {
+  .game {
+    grid-template-rows: 48px minmax(0, 1fr);
+    gap: 10px;
+  }
+  .panel {
+    padding: 9px 10px;
+  }
+  .panel-head {
+    margin-bottom: 6px;
+  }
+  .scoreboard {
+    gap: 6px;
+  }
+  .company {
+    padding: 6px 9px;
+  }
+  .company-name .small {
+    display: none;
+  }
+  .vp b {
+    font-size: 21px;
+  }
+  .vp-bar {
+    margin: 4px 0;
+  }
+  .badges {
+    margin-top: 3px;
+  }
+  .log {
+    min-height: 90px;
+  }
+  .die {
+    width: 36px;
+    height: 36px;
+  }
+  .dice-total {
+    font-size: 26px;
+  }
+  .roll-note {
+    margin: 2px 0 8px;
+  }
+  .hand-card {
+    padding: 5px 2px 4px;
+  }
+  .hand-card b {
+    font-size: 18px;
+  }
+  .build-btn {
+    padding: 4px 8px;
+  }
+  .board {
+    max-height: calc(100vh - 80px);
   }
 }
 @media (max-width: 1080px) {

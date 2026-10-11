@@ -214,6 +214,7 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
         const y2 = a.y + (b.y - a.y) * 0.84;
         return (
           <g key={`road-${e.id}`} className="road">
+            <line x1={x1 * S} y1={y1 * S} x2={x2 * S} y2={y2 * S} stroke={co.color} strokeWidth={18} strokeLinecap="round" className="fresh-road" />
             <line x1={x1 * S} y1={y1 * S} x2={x2 * S} y2={y2 * S} stroke={co.stroke} strokeWidth={11} strokeLinecap="round" />
             <line x1={x1 * S} y1={y1 * S} x2={x2 * S} y2={y2 * S} stroke={co.color} strokeWidth={6.5} strokeLinecap="round" />
           </g>
@@ -235,8 +236,12 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
             key={`he-${e.id}`}
             className="hit"
             onClick={() => onEdge(e.id)}
+            onKeyDown={(ev) => (ev.key === 'Enter' || ev.key === ' ') && onEdge(e.id)}
             onMouseEnter={() => setHoverE(e.id)}
             onMouseLeave={() => setHoverE((h) => (h === e.id ? null : h))}
+            onFocus={() => setHoverE(e.id)}
+            onBlur={() => setHoverE((h) => (h === e.id ? null : h))}
+            tabIndex={0}
             role="button"
             aria-label="Build connection here"
           >
@@ -252,10 +257,15 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
         const vx = board.vertices[v].x * S;
         const vy = board.vertices[v].y * S;
         const co = playerColor(bld.owner);
-        return bld.kind === 'cluster' ? (
-          <ClusterShape key={`b-${v}-c`} x={vx} y={vy} color={co.color} stroke={co.stroke} />
-        ) : (
-          <FactoryShape key={`b-${v}-f`} x={vx} y={vy} color={co.color} stroke={co.stroke} />
+        return (
+          <g key={`b-${v}-${bld.kind}`}>
+            <circle cx={vx} cy={vy} r={14} className="fresh-ring" style={{ stroke: co.color }} />
+            {bld.kind === 'cluster' ? (
+              <ClusterShape x={vx} y={vy} color={co.color} stroke={co.stroke} />
+            ) : (
+              <FactoryShape x={vx} y={vy} color={co.color} stroke={co.stroke} />
+            )}
+          </g>
         );
       })}
 
@@ -270,8 +280,12 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
             key={`hv-${vert.id}`}
             className="hit"
             onClick={() => onVertex(vert.id)}
+            onKeyDown={(ev) => (ev.key === 'Enter' || ev.key === ' ') && onVertex(vert.id)}
             onMouseEnter={() => setHoverV(vert.id)}
             onMouseLeave={() => setHoverV((h) => (h === vert.id ? null : h))}
+            onFocus={() => setHoverV(vert.id)}
+            onBlur={() => setHoverV((h) => (h === vert.id ? null : h))}
+            tabIndex={0}
             role="button"
             aria-label="Build here"
           >
@@ -287,7 +301,15 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
       {board.tiles.map((tile) => {
         if (!highlightTiles.has(tile.id)) return null;
         return (
-          <g key={`ht-${tile.id}`} className="hit" onClick={() => onTile(tile.id)} role="button" aria-label="Move Grid Disruption here">
+          <g
+            key={`ht-${tile.id}`}
+            className="hit"
+            onClick={() => onTile(tile.id)}
+            onKeyDown={(ev) => (ev.key === 'Enter' || ev.key === ' ') && onTile(tile.id)}
+            tabIndex={0}
+            role="button"
+            aria-label={`Move Grid Disruption to ${tile.type === 'barren' ? 'the Dead Zone' : RESOURCE_INFO[tile.type].label}${tile.number ? ` ${tile.number}` : ''}`}
+          >
             <polygon points={hexPoints(tile.x * S, tile.y * S, S * 0.9)} className={`tile-hl${tileMode === 'disrupt' ? ' disrupt' : ''}`} />
           </g>
         );

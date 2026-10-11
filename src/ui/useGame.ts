@@ -3,6 +3,8 @@ import { decideAIAction } from '../engine/ai';
 import { applyAction, disruptionVictims, GameError, getActingPlayer } from '../engine/game';
 import { legalRoadEdges } from '../engine/rules';
 import type { Action, GameState } from '../engine/types';
+import { RESOURCES } from '../engine/types';
+import { RESOURCE_INFO } from '../engine/constants';
 
 const SAVE_KEY = 'settlers-of-compute:save:v1';
 
@@ -130,6 +132,16 @@ export function useGame() {
           setPaused(true);
           pushToast('The AI got stuck — game paused. Please report this seed.', 'error');
           return;
+        }
+      }
+      if (action.type === 'MOVE_DISRUPTION' && action.victim !== null && !cur.players[action.victim].isAI) {
+        const lost = RESOURCES.find((r) => next.players[action.victim!].resources[r] < cur.players[action.victim!].resources[r]);
+        if (lost) pushToast(`${cur.players[actor].name} took 1 ${RESOURCE_INFO[lost].label} from you.`, 'error');
+      }
+      if (action.type === 'PLAY_CONSOLIDATION') {
+        for (const p of cur.players) {
+          const n = p.resources[action.resource];
+          if (!p.isAI && p.id !== actor && n > 0) pushToast(`${cur.players[actor].name} consolidated ${RESOURCE_INFO[action.resource].label}: you handed over ${n}.`, 'error');
         }
       }
       if (action.type === 'RESPOND_TRADE' && cur.pendingTrade && !cur.players[cur.pendingTrade.from].isAI) {

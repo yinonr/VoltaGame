@@ -211,8 +211,15 @@ export function IncomingOfferModal({ state, dispatch }: { state: GameState; disp
   const from = state.players[offer.from];
   const me = state.players[offer.to];
   const canAccept = hasBundle(me.resources, offer.get);
+  const theirCp = scoreBreakdown(state, from.id).publicTotal;
+  const giving = RESOURCES.filter((r) => offer.get[r] > 0);
   return (
     <Modal title={`${from.name} wants to deal`}>
+      <p className="muted small offer-context">
+        <CompanyDot companyId={from.companyId} /> {companyById(from.companyId).sector} · {theirCp} CP · You hold{' '}
+        {giving.map((r) => `${me.resources[r]} ${RESOURCE_INFO[r].label}`).join(', ')}.
+        {theirCp >= 7 && <span className="warn"> Careful: they're close to winning.</span>}
+      </p>
       <div className="offer">
         <div>
           <h3>You receive</h3>
@@ -542,5 +549,41 @@ export function PassScreen({ state, player, onReveal }: { state: GameState; play
         </button>
       </div>
     </div>
+  );
+}
+
+export function AboutModal({ onClose }: { onClose: () => void }) {
+  return (
+    <Modal title="About this prototype" onClose={onClose} wide>
+      <div className="rules about">
+        <p className="intro-lede">You don't have to be a hyperscaler to compete in AI anymore. That's the idea this game tries to make you feel.</p>
+        <h3>Why compute?</h3>
+        <p>
+          Scaling laws turned compute into a basic input for building better AI. But capacity hasn't been spread evenly. Companies with the biggest balance sheets can commit years ahead to
+          land, power and GPUs, while startups, often funded 18 months at a time, pay more, wait longer, or go without. The board here imagines a market where compute works
+          more like a utility, so the scrappy companies get a real shot.
+        </p>
+        <p className="muted small">
+          Framing inspired by the "Little Tech" argument in a16z's August 2026 post announcing its investment in Volta. The game is an abstraction: it does not model any real company's
+          products, financing or operations, and you play a fictional startup — not Volta.
+        </p>
+        <h3>Why a Catan-style game?</h3>
+        <p>
+          Everyone already knows the loop: roll, collect, trade, build. Swap wood and brick for Power and Networking, and sheep and ore for Land and GPUs, and the rules tell the story by themselves.
+          Scarcity is real, geography matters, deals are positive-sum, and there is still only one winner.
+        </p>
+        <h3>How it's built</h3>
+        <ul>
+          <li>React + TypeScript + SVG, fully static: no backend, accounts or paid APIs.</li>
+          <li>A deterministic rules engine: seeded board, immutable state, 50+ automated tests.</li>
+          <li>Three heuristic AI rivals with distinct strategies. They play by the same rules, explain their trade decisions, and use no LLM calls at runtime.</li>
+          <li>The Quick Demo is a real midgame reached by the engine itself, not a scripted mock-up.</li>
+          <li>Designed and built with Claude Code.</li>
+        </ul>
+        <p className="muted small">
+          Independent, unofficial, Catan-inspired creative prototype. Not affiliated with, sponsored or endorsed by Volta or Catan rights holders. All company names are fictional.
+        </p>
+      </div>
+    </Modal>
   );
 }

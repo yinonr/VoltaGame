@@ -104,9 +104,10 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
   useEffect(() => {
     if (state.phase !== 'gameOver') setWinnerDismissed(false);
   }, [state.phase]);
+  const awaitingMyOffer = viewer !== null && state.pendingTrade?.from === viewer;
   useEffect(() => {
-    if (!myAction) setTradeOpen(false);
-  }, [myAction]);
+    if (!myAction && !awaitingMyOffer) setTradeOpen(false);
+  }, [myAction, awaitingMyOffer]);
 
   const highlights = useMemo(() => {
     const out = { v: EMPTY, e: EMPTY, t: EMPTY, ghost: null as Ghost };
