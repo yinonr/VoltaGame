@@ -74,7 +74,7 @@ describe('Infrastructure Financing during Grid Stability', () => {
     s = roll(s, home.number!);
     const owed = s.buildings[corner]!.financed!;
     expect(owed).toBeLessThan(3);
-    expect(s.lastProduction!.deliveries.length).toBeGreaterThan(0);
+    expect(s.lastProduction!.deliveries?.length ?? 0).toBeGreaterThan(0);
     expect(gridStatus(s).stableRolls).toBe(5);
 
     const handBefore = s.players.map((p) => ({ ...p.resources }));
