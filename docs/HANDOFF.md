@@ -1,13 +1,19 @@
 # Handoff — Settlers of Compute
 
-_Last updated: 2026-10-11 (session 1)._
+_Last updated: 2026-10-11, end of session 1._
 
 ## Where things are
 
 - **Repository:** https://github.com/yinonr/VoltaGame
-- **Working branch:** `claude/new-session-4osyq1`. All work is pushed here. Check `git log -1` for the exact tip; it is listed below, as of the previous docs commit.
+- **Working branch:** `claude/new-session-4osyq1`. All work is pushed here.
 - **`main`:** initialized with the first foundation checkpoint (`92d72d9`). It does **not** yet contain the later work. Merge the working branch (PR or fast-forward) to update `main` and trigger the Pages deploy.
-- **Latest pushed checkpoints:** `92d72d9` foundation · `2e7d24f` playable core + tests · Phase 3 checkpoint (this commit's parent chain; see `git log`).
+- **Pushed checkpoints on the working branch:**
+  - `92d72d9` foundation
+  - `2e7d24f` playable core + tests
+  - `fc526fa` competitive feel + docs + workflows
+  - `1ac2521` demo + polish (latest code commit)
+  - this docs update, committed right after `1ac2521` (run `git log -1` for its SHA)
+- **CI:** GitHub Actions `CI` passed on `fc526fa` (`npm ci`, `npm test`, `npm run build` on ubuntu-latest).
 
 ## Feature status
 
@@ -35,7 +41,10 @@ _Last updated: 2026-10-11 (session 1)._
 
 - `npm test`: **53 passed**, 1 skipped (the opt-in QA fixture generator), 7 suites.
 - `npm run build` (tsc + vite): passes.
-- Browser automation with headless Chromium (Playwright) against `vite preview`, 1440×900:
+- Browser automation with headless Chromium (Playwright) against `vite preview`, at 1440×900 unless noted:
+  - Interview path: Quick Demo → offer Ambulo 1 Power for 1 GPU → accepted with a reason → build the AI Factory → end turn. The three AI turns take about 10 s at Normal speed, and two rivals made offers to the human (Accept/Decline dialog). No errors.
+  - Full game: a scripted human against Turbo-speed AI, played to the winner screen (18 human turns, 12 builds, 2 discards, 8 outage moves). No errors.
+  - Layout at 1280×720, 1366×768 and 1920×1080: no page scroll, nothing clipped. The right column scrolls internally for the Innovation Cards list.
   - Title → Quick Demo → intro → board: rendered, no console errors.
   - New Game: roll, payouts, disabled build reasons, trade modal (market + rivals), end turn, three AI turns (including an AI–AI trade and an AI 7 with a steal), back to the human. No errors.
   - Injected states: a human 7 with 9 cards → discard modal → move outage → victim picker → steal logged. Resource Grant modal, the one-card-per-turn block, Network Expansion's two free connections, and a winning cluster build → winner modal. No errors.
@@ -51,8 +60,8 @@ _Last updated: 2026-10-11 (session 1)._
 ## Next steps (priority order)
 
 1. Merge `claude/new-session-4osyq1` into `main`, then enable Pages (Settings → Pages → Source: GitHub Actions) and confirm the deploy workflow publishes `https://yinonr.github.io/VoltaGame/`.
-2. Do a demo rehearsal pass: tune the Quick Demo criteria (for example, keep the human slightly behind the leader for tension) and check that copy fits the 30-second premise and 60-second first move.
-3. Visual polish: AI move highlights (briefly flash the newest piece), steal/discard animations, a compact mode for the right column.
+2. Rehearse the demo once on the actual presenting machine and browser. The demo seed is pinned (392), so the opening position is always the same; later dice are seeded too, so the AI turns replay identically unless you choose differently.
+3. Visual polish: steal/discard animations on the board, a turn-summary card when control returns to the human, sound.
 4. Improve the AI: smarter road targeting toward hubs, counter-offers, stronger use of Market Consolidation.
 5. Add open offers to all rivals at once, and allow the other cards before the roll.
 

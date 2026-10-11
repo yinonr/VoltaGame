@@ -99,7 +99,13 @@ The AI is deterministic and has no LLM in the loop. It plays by the same rules a
 ## Quick Start and Quick Demo
 
 - **Quick Start:** the real snake draft (1-2-3-4-4-3-2-1) runs with the AI placement heuristic for every seat, and opening resources come from each second cluster. Up to 8 boards derived from the seed are tried, and the one with the most even opening production is kept.
-- **Quick Demo** (`src/engine/demo.ts`): from a fixed seed, all four seats play the real engine until Parallax Labs has rolled in round 7+. The resulting position must satisfy these criteria: human at 4–6 CP, nobody above 7, everyone with infrastructure, a legal cluster site, a cluster to upgrade, and at least one AI rival willing to sell a GPU. The human's hand is then set to `1 Power, 1 Networking, 1 Land, 3 Capital, 1 GPU`. With that hand a cluster or an Innovation Card is affordable now, while an AI Factory needs one more GPU, which means a trade. The scenario is deterministic and covered by tests, and every move after it is live engine play.
+- **Quick Demo** (`src/engine/demo.ts`): starting from `DEMO_SEED = 392`, all four seats play the real engine until Parallax Labs has rolled in round 7 or later. The position must then pass these checks:
+  - the human is at 4–6 CP and nobody is above 7;
+  - every company has infrastructure;
+  - the human has a legal cluster site and a cluster to upgrade;
+  - at least one AI rival is willing to sell a GPU.
+
+  The human's hand is set to `1 Power, 1 Networking, 1 Land, 3 Capital, 1 GPU`, and the human also holds an AI Breakthrough the computer bought for that seat. With seed 392 the race is tight: 4 / 3 / 4 / 4 CP. A cluster or Innovation Card is affordable now. An AI Factory needs one more GPU, and Ambulo Robotics will sell it for the Power or Networking the cluster would have used. That makes the first decision a real trade-off. The seed was picked by an offline search over seeds 1–400 that scored candidates on closeness of the race. If a future engine change breaks the criteria, the code falls back to derived seeds. The scenario is deterministic and covered by tests, and every move after it is live engine play.
 
 ## Architecture
 
