@@ -613,7 +613,8 @@ export function IntroModal({ onStart, demo, state, viewer = null }: { onStart: (
           </div>
         </div>
         <p className="intro-lede">
-          Compute is no longer just for giants. Four ambitious AI companies. One emerging market. Build your infrastructure, make your deals, and become the market leader.
+          Compute is no longer just for giants. {['Two', 'Three', 'Four'][(state?.players.length ?? 4) - 2] ?? 'Four'} ambitious AI companies. One emerging market. Build your
+          infrastructure, make your deals, and become the market leader.
         </p>
         {demo ? (
           <ol className="intro-steps">

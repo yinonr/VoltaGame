@@ -76,8 +76,7 @@ React 19 + TypeScript + Vite 8 + Vitest 5, SVG board, plain CSS, fully static.
 See `docs/HANDOFF.md` → "Next session", in this order:
 
 1. owner review on a phone, then publish;
-2. victory-screen accomplishments;
-3. market events behind an experimental toggle;
-4. human playtests;
-5. onboarding hints;
-6. online multiplayer, last.
+2. market events behind an experimental toggle;
+3. human playtests;
+4. onboarding hints;
+5. online multiplayer, last.

@@ -37,6 +37,7 @@ On the latest commit: **163 tests pass** and 4 opt-in simulations are skipped; t
 | **Fewer interruptions:** AI offers to a human dropped from 10.9 to 2.2 per game | `trade-offers.test.ts` (30 seeds), with an all-AI fingerprint check |
 | **Feedback:** dice tumble, lit hexes, BLOCKED flash, your ringed payout chips, '+N' gains, build pulses, rival ticker | Browser screenshots on desktop and phone |
 | **Classic Mode and old saves** behave exactly as before: same AI decisions, same Quick Demo, 25-card deck | Seeded fingerprint tests, old-save tests in `financing.test.ts` and `invariants.test.ts`, all earlier tests unchanged |
+| **Victory screen:** CP count-up, a burst in the winner's color, and accomplishments read from the final state (factories, financed, Longest Network, Priority Access, Full-Stack with its round, Breakthroughs) | `qa-win-compute.json` fixture checked in Chromium on desktop and phone |
 | **Public concept branding:** "A concept for Volta" plus the disclaimer; no sponsorship claim; the private branded preview is unchanged | Agent browser check of the public and branded titles |
 
 ## Tests and builds (actual results)
@@ -104,8 +105,6 @@ Players see a New Game setup (name, rivals, rules). The default game uses Infras
 - **Setup screen:** on phones the Classic rules card sits below the sticky Start button, so you scroll to switch modes.
 - **Copy and display:**
   - Long custom names are truncated in phone chips (the full name shows in the Market sheet).
-  - The IntroModal says "Four ambitious AI companies" even in 2–3 seat custom games.
-- **Victory screen:** shows standings (with financed factories separated) but not yet a list of accomplishments such as Full-Stack or financing totals.
 - **Balance shifts:**
   - Integrated Deployment is rare in AI hands (0.3–0.4 per game). A human can use it more.
   - Innovation Cards and Priority Access are used about half as often under the Compute rules.
@@ -115,11 +114,10 @@ Players see a New Game setup (name, rivals, rules). The default game uses Infras
 ## Next session (priority order)
 
 1. **Owner review on a real phone**, then publish (see above). Fix only what that review finds.
-2. **Victory screen accomplishments** from real state: Full-Stack turn, financed factories, Longest Network, Priority Access.
-3. **Market events:** restore `s2/events` from `recovery/`, update it to the 5-unit commitment and the ceiling of 6, keep it behind a Custom-game "Market events (experimental)" toggle, and rerun the balance probe.
-4. **Human playtests of the Compute rules.** Watch the card economy and how often humans use Integrated Deployment; consider the 7-resource recipe only if it is rarely used.
-5. **Onboarding:** light contextual hints on the first turns (for example the first financed upgrade, the first milestone).
-6. **Online multiplayer**, last (`docs/MULTIPLAYER_PLAN.md`).
+2. **Market events:** restore `s2/events` from `recovery/`, update it to the 5-unit commitment and the ceiling of 6, keep it behind a Custom-game "Market events (experimental)" toggle, and rerun the balance probe.
+3. **Human playtests of the Compute rules.** Watch the card economy and how often humans use Integrated Deployment; consider the 7-resource recipe only if it is rarely used.
+4. **Onboarding:** light contextual hints on the first turns (for example the first financed upgrade, the first milestone).
+5. **Online multiplayer**, last (`docs/MULTIPLAYER_PLAN.md`).
 
 ## Commands
 
