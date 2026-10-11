@@ -61,7 +61,21 @@ export function Modal({ title, children, onClose, wide = false, className = '' }
   );
 }
 
-function Stepper({ value, onChange, max, label }: { value: ResourceBundle; onChange: (b: ResourceBundle) => void; max?: ResourceBundle; label: string }) {
+function Stepper({
+  value,
+  onChange,
+  max,
+  total,
+  label,
+}: {
+  value: ResourceBundle;
+  onChange: (b: ResourceBundle) => void;
+  max?: ResourceBundle;
+  /** Stop every + once this many are selected in all (the discard target). */
+  total?: number;
+  label: string;
+}) {
+  const full = total !== undefined && sumBundle(value) >= total;
   return (
     <div className="stepper" aria-label={label}>
       {RESOURCES.map((r) => {
@@ -71,11 +85,16 @@ function Stepper({ value, onChange, max, label }: { value: ResourceBundle; onCha
             <ResourceIcon type={r} size={20} />
             <span className="small">{RESOURCE_INFO[r].label}</span>
             <div className="stepper-ctrl">
-              <button className="icon-btn" disabled={value[r] <= 0} onClick={() => onChange({ ...value, [r]: value[r] - 1 })} aria-label={`Less ${RESOURCE_INFO[r].label}`}>
+              <button className="icon-btn" disabled={value[r] <= 0} onClick={() => onChange({ ...value, [r]: value[r] - 1 })} aria-label={`Less ${RESOURCE_INFO[r].label} (${label})`}>
                 −
               </button>
               <b>{value[r]}</b>
-              <button className="icon-btn" disabled={value[r] >= limit} onClick={() => onChange({ ...value, [r]: value[r] + 1 })} aria-label={`More ${RESOURCE_INFO[r].label}`}>
+              <button
+                className="icon-btn"
+                disabled={value[r] >= limit || full}
+                onClick={() => onChange({ ...value, [r]: value[r] + 1 })}
+                aria-label={`More ${RESOURCE_INFO[r].label} (${label})`}
+              >
                 +
               </button>
             </div>
@@ -293,7 +312,7 @@ export function DiscardModal({ state, player, dispatch }: { state: GameState; pl
       <p>
         You hold {sumBundle(me.resources)} resources. Discard <b>{need}</b> back to the market.
       </p>
-      <Stepper value={sel} onChange={setSel} max={me.resources} label="Discard" />
+      <Stepper value={sel} onChange={setSel} max={me.resources} total={need} label="Discard" />
       <div className="modal-actions">
         <span className={n === need ? 'muted small' : 'why'}>{n === need ? 'Ready.' : `Selected ${n} of ${need}.`}</span>
         <button className="btn primary" disabled={n !== need} onClick={() => dispatch({ type: 'DISCARD', resources: sel })}>

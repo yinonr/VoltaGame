@@ -22,6 +22,7 @@ import { checkBuild, checkPlayCard, piecesLeft } from '../engine/rules';
 import type { Check } from '../engine/rules';
 import { longestNetwork, scoreBreakdown } from '../engine/scoring';
 import type { DevCardType, DiceRoll, GameState, LogEntry, ResourceBundle } from '../engine/types';
+import { logNewestTurnFirst } from './logOrder';
 import { RESOURCES } from '../engine/types';
 import { ClusterShape, FactoryShape } from './Board';
 import { GainRibbon, prefersReducedMotion, useGainFlash } from './feedback';
@@ -181,7 +182,7 @@ export function Scoreboard({ state, viewer }: { state: GameState; viewer: number
 // ---------------------------------------------------------------------------
 
 export function EventLog({ state }: { state: GameState }) {
-  const entries = state.log.slice(-60).reverse();
+  const entries = logNewestTurnFirst(state.log.slice(-60));
   return (
     <section className="panel log" aria-label="Event log" aria-live="polite">
       <header className="panel-head">

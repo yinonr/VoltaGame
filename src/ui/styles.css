@@ -1753,6 +1753,11 @@ kbd {
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.9);
 }
+/* Disabled zoom buttons stay solid (dimmed text only), so the board never shows through them. */
+.m-zoom .icon-btn:disabled {
+  opacity: 1;
+  color: rgba(148, 163, 184, 0.35);
+}
 .m-confirm {
   position: absolute;
   left: 8px;
@@ -1816,11 +1821,13 @@ kbd {
   flex: 1;
   min-width: 0;
   margin: 0;
-  line-height: 1.25;
+  font-size: 12px;
+  line-height: 1.22;
   color: #cbd5e1;
   overflow: hidden;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  /* Three short lines fit beside the dice and the action button, so long payouts are not cut. */
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
 }
 .m-dock-actions {

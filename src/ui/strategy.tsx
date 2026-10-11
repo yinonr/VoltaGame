@@ -1,7 +1,9 @@
+import type { ReactNode } from 'react';
 import {
   FINANCING_COMMITMENT,
   FINANCING_COST,
   FINANCING_MAX_OUTSTANDING,
+  GRID_STABILITY_ROLLS,
   INTEGRATED_DEPLOYMENT_COST,
   RESOURCE_INFO,
   describeBundle,
@@ -143,31 +145,52 @@ export function FullStackPanel({ state, player }: { state: GameState; player: nu
  * Grid Stability at a glance: whether a natural 7 can disrupt right now, and how long the current
  * outage lasts. Two small chips, no dialogs. Renders nothing in Classic.
  */
-export function GridStatusBar({ state, compact = false }: { state: GameState; compact?: boolean }) {
+export function GridStatusBar({ state, compact = false, onExplain }: { state: GameState; compact?: boolean; onExplain?: (text: string) => void }) {
   const g = gridStatus(state);
   if (!g.enabled) return null;
   const rolls = (n: number) => `${n} roll${n === 1 ? '' : 's'}`;
   const outage = g.outageTile !== null && g.outageRolls > 0 ? state.board.tiles[g.outageTile] : null;
+  // Desktop explains a chip in its tooltip; touch screens have no hover, so a tap explains it instead.
+  const chip = (cls: string, tip: string, body: ReactNode) =>
+    onExplain ? (
+      <button type="button" className={`grid-chip ${cls}`} onClick={() => onExplain(tip)} aria-label={tip}>
+        {body}
+      </button>
+    ) : (
+      <span className={`grid-chip ${cls}`} title={tip}>
+        {body}
+      </span>
+    );
   return (
     <div className={`grid-status${compact ? ' compact' : ''}`} role="status" aria-live="polite">
-      {g.vulnerable ? (
-        <span className="grid-chip vulnerable" title="A natural 7 now triggers a Grid Disruption: discards, an outage and a theft.">
-          <i aria-hidden="true" />
-          Grid vulnerable
-        </span>
-      ) : (
-        <span className="grid-chip stable" title={`A 7 in the next ${rolls(g.stableRolls)} causes no disruption.`}>
-          <i aria-hidden="true" />
-          Stabilizing · {rolls(g.stableRolls)}
-        </span>
-      )}
-      {outage && outage.type !== 'barren' && (
-        <span className="grid-chip outage" title={`The ${RESOURCE_INFO[outage.type].label} ${outage.number} hex is offline; it produces again after ${rolls(g.outageRolls)}.`}>
-          <i aria-hidden="true" />
-          Outage · {compact ? '' : `${RESOURCE_INFO[outage.type].label} ${outage.number} · `}
-          {rolls(g.outageRolls)}
-        </span>
-      )}
+      {g.vulnerable
+        ? chip(
+            'vulnerable',
+            `Grid vulnerable: the next natural 7 is a Grid Disruption (discards over 7 cards, a hex goes offline, a theft). After one, the grid stays calm for ${GRID_STABILITY_ROLLS} rolls.`,
+            <>
+              <i aria-hidden="true" />
+              Grid vulnerable
+            </>,
+          )
+        : chip(
+            'stable',
+            `Grid stabilizing: a 7 in the next ${rolls(g.stableRolls)} causes no disruption (it still produces nothing).`,
+            <>
+              <i aria-hidden="true" />
+              Stabilizing · {rolls(g.stableRolls)}
+            </>,
+          )}
+      {outage &&
+        outage.type !== 'barren' &&
+        chip(
+          'outage',
+          `Outage: the ${RESOURCE_INFO[outage.type].label} ${outage.number} hex is offline and produces again after ${rolls(g.outageRolls)}.`,
+          <>
+            <i aria-hidden="true" />
+            Outage · {compact ? '' : `${RESOURCE_INFO[outage.type].label} ${outage.number} · `}
+            {rolls(g.outageRolls)}
+          </>,
+        )}
     </div>
   );
 }

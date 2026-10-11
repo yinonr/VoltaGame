@@ -167,6 +167,12 @@
   z-index: 5;
   pointer-events: none;
 }
+/* Touch: each chip is a button that explains itself (the board stays tappable around them). */
+.grid-status.compact button.grid-chip {
+  pointer-events: auto;
+  cursor: pointer;
+  min-height: 26px;
+}
 .grid-chip {
   display: inline-flex;
   align-items: center;

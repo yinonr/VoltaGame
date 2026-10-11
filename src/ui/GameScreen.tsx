@@ -138,6 +138,8 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
   }, [state, mode, viewer]);
   useEffect(() => {
     if (state.phase !== 'gameOver') setWinnerDismissed(false);
+    // A win from inside a sheet (a refinance in Build) must not leave that sheet behind the results.
+    else setSheet(null);
   }, [state.phase]);
   const awaitingMyOffer = viewer !== null && state.pendingTrade?.from === viewer;
   useEffect(() => {
@@ -421,7 +423,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
 
         <div className="m-board">
           <ZoomableBoard zoom={zoom}>{boardEl}</ZoomableBoard>
-          <GridStatusBar state={state} compact />
+          <GridStatusBar state={state} compact onExplain={(t) => pushToast(t, 'info')} />
           <div className="m-zoom">
             <button className="icon-btn" onClick={() => setZoom(ZOOM_LEVELS[Math.max(0, zi - 1)])} disabled={zi <= 0} aria-label="Zoom out">
               −
