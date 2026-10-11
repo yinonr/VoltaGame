@@ -3,6 +3,7 @@ import { decideAIAction } from '../ai';
 import { CLASSIC_RULES, COMPUTE_RULES, MAX_COMPANY_NAME, sanitizeCompanyName, rulesOf } from '../constants';
 import type { SeatConfig } from '../game';
 import { applyAction, createGame, getActingPlayer } from '../game';
+import { financedVertices } from '../financing';
 import type { GameState } from '../types';
 import {
   choiceOf,
@@ -255,6 +256,8 @@ describe('names never change the mechanics', () => {
         const b2 = play(b, 400);
         expect(a2.turn).toBeGreaterThan(8);
         expect(a2.log.some((l) => l.text.includes('Zebra Genomics 9'))).toBe(true);
+        // Under Settlers of Compute rules the run exercises Infrastructure Financing too.
+        expect(a2.log.some((l) => l.kind === 'finance')).toBe(rules.financing);
         expect(unnamed(a2)).toEqual(b2);
       }
     });
@@ -302,5 +305,27 @@ describe('saves and standings', () => {
     s = { ...s, players: s.players.map((p) => (p.id === 0 ? { ...p, devCards: [{ id: 1, type: 'breakthrough', boughtOnTurn: 0 }] } : p)) };
     expect(leaderOf(s)).toBe(null);
     expect(leaderOf({ ...s, phase: 'gameOver' })).toBe(0);
+  });
+
+  it('counts a financed AI Factory as 1 public point (and as Leveraged) until it is delivered', () => {
+    const financed = (st: GameState, v: number, owner: number, units: number): GameState => {
+      const buildings = st.buildings.slice();
+      buildings[v] = { owner, kind: 'factory', financed: units };
+      return { ...st, buildings, rules: { ...COMPUTE_RULES } };
+    };
+    let s = place(blankGame(), 20, 2);
+    s = financed(s, 0, 1, 3);
+    expect(financedVertices(s, 1)).toEqual([0]); // the scoreboard's "Leveraged ×1"
+    expect(financedVertices(s, 2)).toEqual([]);
+    expect(leaderOf(s)).toBe(null); // 1 CP each: a tie
+    s = financed(s, 40, 1, 1);
+    expect(financedVertices(s, 1)).toEqual([0, 40]);
+    expect(leaderOf(s)).toBe(1);
+    // Fully delivered, the same building is a 2 CP factory and no longer leveraged.
+    s = place(place(s, 0, 1, 'factory'), 40, 0);
+    expect(financedVertices(s, 1)).toEqual([]);
+    expect(leaderOf(s)).toBe(1);
+    s = place(s, 20, 2, 'factory');
+    expect(leaderOf(s)).toBe(null);
   });
 });

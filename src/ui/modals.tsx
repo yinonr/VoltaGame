@@ -9,7 +9,7 @@ import { SHOW_QUICK_DEMO } from './flags';
 import { ResourceIcon } from './icons';
 import { CompanyDot } from './panels';
 import { PUBLIC_DISCLAIMER, VOLTA_BRANDING, VOLTA_SITE_URL, VoltaWordmark } from './brand';
-import { profileOf } from './companies';
+import { choiceOf, profileOf } from './companies';
 
 export function Modal({ title, children, onClose, wide = false, className = '' }: { title: string; children: ReactNode; onClose?: () => void; wide?: boolean; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -566,6 +566,19 @@ export function IntroModal({ onStart, demo, state, viewer = null }: { onStart: (
                 : 'Each company starts with two Compute Clusters and two Network Connections.'}
             </li>
             <li>Roll, collect, trade and build. First to 10 Compute Points wins.</li>
+            {state && (
+              <li>
+                {choiceOf(state.rules) === 'compute' ? (
+                  <>
+                    <b>Settlers of Compute</b> rules: Infrastructure Financing and Full-Stack Integration are on.
+                  </>
+                ) : (
+                  <>
+                    <b>Classic</b> rules: no Financing, no Full-Stack Integration.
+                  </>
+                )}
+              </li>
+            )}
           </ol>
         )}
         {rivals.length > 0 && (
@@ -582,7 +595,7 @@ export function IntroModal({ onStart, demo, state, viewer = null }: { onStart: (
         )}
         <div className="modal-actions">
           <button className="btn primary" onClick={onStart}>
-            {demo ? 'Take my turn' : 'Start'}
+            {demo ? 'Take my turn' : 'Play'}
           </button>
         </div>
       </div>

@@ -27,8 +27,8 @@ const RULES_OPTIONS: { id: RulesChoice; title: string; tag?: string; lines: [str
     title: 'Settlers of Compute',
     tag: 'Recommended',
     lines: [
-      ['Financing', 'upgrade now with 2 GPUs, pay it back from production.'],
-      ['Full-Stack', 'build across the stack to unlock direct AI Factory deployment.'],
+      ['Infrastructure Financing', 'upgrade now for 2 GPUs, repay from production.'],
+      ['Full-Stack Integration', 'build across the stack to deploy AI Factories directly.'],
     ],
   },
   {
@@ -36,7 +36,7 @@ const RULES_OPTIONS: { id: RulesChoice; title: string; tag?: string; lines: [str
     title: 'Classic',
     lines: [
       ['Original rules', 'roll, collect, trade and build.'],
-      ['', 'No Financing, no Full-Stack.'],
+      ['', 'No Financing, no Full-Stack Integration.'],
     ],
   },
 ];
