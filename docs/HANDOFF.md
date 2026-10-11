@@ -23,8 +23,9 @@ _Last updated: 2026-10-11, end of session 1 (the mobile + deployment continuatio
   - It deploys an AI Factory straight onto a new network site for 1 Land + 3 Capital + 2 GPUs, worth +2 CP.
   - It has engine logic, AI play logic, desktop and mobile UI (placement mode plus confirm on phones), and flavor text.
   - 8 new tests: **61 passing in total**. Browser-checked on desktop and at 390×844.
+  - An independent review found the AI played only about 12% of drawn copies. The AI now saves toward the card's cost and builds connections toward a site when it holds one; the play rate is **25%** over 200 seeded games, with game length and win split unchanged. A regression test asserts at least 18%.
   - The default deck is unchanged (25 cards), so the Quick Demo, AI seeds and all earlier tests behave exactly as before. The mobile regression suite was re-run on this branch and passed.
-- **Infrastructure Financing card: designed, NOT implemented.** The full spec, exploit review and step-by-step implementation plan are in `docs/VOLTA_SPECIAL_CARDS.md`.
+- **Infrastructure Financing card: designed, NOT implemented.** The full spec and step-by-step implementation plan are in `docs/VOLTA_SPECIAL_CARDS.md`. Two independent adversarial reviewers checked the spec against the engine. All 15 of their findings are incorporated, among them the circular AI rule, immutability of Building objects, phantom shortages, six "factories produce double" call sites, Refinance UI placement, and corrected pip math.
 
 ### How to view the branded build locally
 

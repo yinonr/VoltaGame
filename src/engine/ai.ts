@@ -1,4 +1,4 @@
-import { COSTS, RESOURCE_INFO, bundle, companyById, describeBundle, hasBundle, missingFor, pips, sumBundle } from './constants';
+import { COSTS, INTEGRATION_COST, RESOURCE_INFO, bundle, companyById, describeBundle, hasBundle, missingFor, pips, sumBundle } from './constants';
 import type { BuildType } from './constants';
 import { bestSetupRoad, bestSetupVertex, productionPips, totalPips, vertexValue } from './evaluation';
 import { disruptionVictims } from './game';
@@ -22,7 +22,8 @@ import { RESOURCES } from './types';
 // reproducible and testable. The AI never reads rivals' hidden hands or cards.
 
 interface Goal {
-  kind: BuildType;
+  /** 'integration' = save up for a held Full-Stack Integration card. */
+  kind: BuildType | 'integration';
   cost: ResourceBundle;
   /** Rough priority score used to rank goals. */
   score: number;
@@ -110,13 +111,18 @@ function goals(state: GameState, player: number): Goal[] {
   const left = piecesLeft(state, player);
   const out: Goal[] = [];
   const hasClusterSite = legalClusterVertices(state, player).length > 0;
+  const holdsIntegration = state.players[player].devCards.some((c) => c.type === 'integration');
+  // Holding Full-Stack Integration: save toward its cost so the card isn't a dead draw.
+  if (holdsIntegration && left.factory > 0 && hasClusterSite) {
+    out.push({ kind: 'integration', cost: INTEGRATION_COST, score: 4.2 * st.factories });
+  }
   if (left.factory > 0 && legalFactoryVertices(state, player).length > 0) {
     out.push({ kind: 'factory', cost: COSTS.factory, score: 3.4 * st.factories });
   }
   if (left.cluster > 0 && hasClusterSite) {
     out.push({ kind: 'cluster', cost: COSTS.cluster, score: 3.6 * st.expansion });
   }
-  if (left.cluster > 0 && !hasClusterSite && left.road > 0 && legalRoadEdges(state, player).length > 0) {
+  if ((left.cluster > 0 || (holdsIntegration && left.factory > 0)) && !hasClusterSite && left.road > 0 && legalRoadEdges(state, player).length > 0) {
     out.push({ kind: 'road', cost: COSTS.road, score: 2.6 * st.expansion });
   }
   if (state.devDeck.length > 0) {
@@ -203,7 +209,9 @@ export function evaluateOffer(state: GameState, player: number, offer: TradeOffe
   const precious = RESOURCES.find((r) => pay[r] > 0 && me.resources[r] - pay[r] < goalCost[r]);
 
   if (gain - loss >= threshold) {
-    const what = goal ? `${goal.kind === 'card' ? 'an Innovation Card' : goal.kind === 'factory' ? 'an AI Factory' : goal.kind === 'cluster' ? 'a new cluster' : 'a new connection'}` : 'its plans';
+    const what = goal
+      ? `${goal.kind === 'card' ? 'an Innovation Card' : goal.kind === 'factory' || goal.kind === 'integration' ? 'an AI Factory' : goal.kind === 'cluster' ? 'a new cluster' : 'a new connection'}`
+      : 'its plans';
     return {
       accept: true,
       reason: needed ? `needs ${RESOURCE_INFO[needed].label} for ${what}.` : 'a fair deal for both sides.',
@@ -409,8 +417,10 @@ function mainPhase(state: GameState, player: number): Action {
   const card = cardAction(state, player, goal);
   if (card) return card;
 
-  // Immediate high-value builds.
-  if (checkBuild(state, player, 'factory').ok) {
+  // Immediate high-value builds — unless we're one resource away from an integrated deployment,
+  // which needs the same Capital and GPUs and scores twice as much.
+  const savingForIntegration = goal?.kind === 'integration' && sumBundle(missingFor(have, goal.cost)) <= 1;
+  if (!savingForIntegration && checkBuild(state, player, 'factory').ok) {
     return { type: 'BUILD_FACTORY', vertex: bestFactoryVertex(state, player) };
   }
   if (checkBuild(state, player, 'cluster').ok) {

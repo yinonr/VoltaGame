@@ -109,20 +109,25 @@ describe('Full-Stack Integration', () => {
     expect(site).toBeGreaterThanOrEqual(0);
   });
 
-  it('AI-only games with Volta cards still finish legally', () => {
+  it('AI-only games with Volta cards finish legally, and the AI actually uses the card', () => {
+    // Regression guard: before the AI saved toward INTEGRATION_COST it played only ~12% of drawn copies.
+    let bought = 0;
     let played = 0;
-    for (const seed of [3, 11, 19, 27, 35, 43]) {
+    for (let seed = 9000; seed < 9100; seed++) {
       let s = createGame({ seed, seats: ALL_AI, voltaCards: true });
       let steps = 0;
-      while (s.phase !== 'gameOver' && steps < 5000) {
+      while (s.phase !== 'gameOver' && steps < 6000) {
         const a = decideAIAction(s, getActingPlayer(s)!);
+        const held = s.players[s.currentPlayer].devCards.filter((c) => c.type === 'integration').length;
         if (a.type === 'PLAY_INTEGRATION') played++;
         s = applyAction(s, a);
+        if (a.type === 'BUY_CARD' && s.players[s.currentPlayer].devCards.filter((c) => c.type === 'integration').length > held) bought++;
         steps++;
       }
       expect(s.phase, `seed ${seed}`).toBe('gameOver');
       expect(conservation(s)).toEqual(bundle({ power: 19, networking: 19, land: 19, capital: 19, gpu: 19 }));
     }
-    expect(played).toBeGreaterThan(0); // the card actually shows up and gets used
+    expect(bought).toBeGreaterThan(20);
+    expect(played / bought).toBeGreaterThanOrEqual(0.18);
   });
 });
