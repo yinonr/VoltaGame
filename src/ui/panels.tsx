@@ -436,11 +436,14 @@ export function BuildPanel({
   player,
   mode,
   onSelect,
+  touch = false,
 }: {
   state: GameState;
   player: number;
   mode: BuildChoice | null;
   onSelect: (t: BuildChoice) => void;
+  /** Touch layout: tap wording, no keyboard hint. */
+  touch?: boolean;
 }) {
   const p = state.players[player];
   const company = companyById(p.companyId);
@@ -448,7 +451,7 @@ export function BuildPanel({
     <section className="panel build" aria-label="Build">
       <header className="panel-head">
         <h2>Build</h2>
-        <span className="muted small">Click, then pick a glowing spot</span>
+        <span className="muted small">{touch ? 'Tap, then pick a glowing spot' : 'Click, then pick a glowing spot'}</span>
       </header>
       {buildRows(state, player).map(({ key, label, left, value, cost, check }) => {
         const active = mode === key;
@@ -467,7 +470,7 @@ export function BuildPanel({
                   {label} <span className="left-count">{left}</span>
                 </strong>
                 {active ? (
-                  <span className="small hint">Pick a glowing spot · Esc to cancel</span>
+                  <span className="small hint">{touch ? 'Pick a glowing spot on the board' : 'Pick a glowing spot · Esc to cancel'}</span>
                 ) : check.ok ? (
                   <span className="small muted">{value}</span>
                 ) : (

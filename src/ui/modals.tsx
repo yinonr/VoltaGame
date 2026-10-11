@@ -11,6 +11,7 @@ import {
   GRID_STABILITY_ROLLS,
   INTEGRATED_DEPLOYMENT_COST,
   RESOURCE_INFO,
+  VP_TO_WIN,
   bundle,
   companyById,
   describeBundle,
@@ -558,8 +559,8 @@ export function RulesModal({ onClose }: { onClose: () => void }) {
         </ul>
         <h3>Grid Disruption (roll of 7)</h3>
         <p>
-          Nothing produces. Anyone holding more than 7 resources discards half (rounded down). The roller moves the outage marker to a new hex — it stops producing until moved
-          again — and takes 1 random resource from a rival next to it.
+          Nothing produces. Anyone holding more than 7 resources discards half (rounded down). The roller moves the outage marker to a new hex, which stops producing
+          (in Classic until the marker moves again; under Grid Stability for {GRID_OUTAGE_ROLLS} rolls), and takes 1 random resource from a rival next to it.
         </p>
         <h3>Bonuses</h3>
         <ul>
@@ -637,15 +638,20 @@ export function IntroModal({ onStart, demo, state, viewer = null }: { onStart: (
             <li>
               {draft
                 ? 'Opening draft: each company places a Compute Cluster and a Network Connection, then again in reverse order.'
-                : 'Each company starts with two Compute Clusters and two Network Connections.'}
+                : 'You start with two Compute Clusters (1 CP each) and two Network Connections.'}
             </li>
-            <li>Roll, collect, trade and build. First to 10 Compute Points wins.</li>
+            <li>
+              <b>Roll</b>: every hex showing the number pays 1 resource to each cluster on its corners (2 to an AI Factory).
+            </li>
+            <li>
+              <b>Build</b>: spend resources on new clusters (+1 CP) and AI Factory upgrades (+1 more). Trade for what you lack. First to {VP_TO_WIN} CP wins.
+            </li>
             {state && (
               <li>
                 {choiceOf(state.rules) === 'compute' ? (
                   <>
-                    <b>Settlers of Compute</b> rules: Infrastructure Financing and Full-Stack Integration are on
-                    {state?.rules?.gridStability ? ', and Grid Stability keeps disruptions rare (6 calm rolls after each; outages last 4).' : '.'}
+                    <b>Settlers of Compute</b> rules: Infrastructure Financing, Full-Stack Integration
+                    {state?.rules?.gridStability ? ' and Grid Stability are on.' : ' are on.'} Details in How to play.
                   </>
                 ) : (
                   <>

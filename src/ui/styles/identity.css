@@ -459,7 +459,7 @@
 }
 .m-chip.me {
   /* Your own (often longer, custom) name gets the widest chip; rivals show short names. */
-  flex-grow: 1.6;
+  flex-grow: 1.4;
   border-color: color-mix(in srgb, var(--co) 60%, transparent);
   background: color-mix(in srgb, var(--co) 15%, rgba(10, 16, 32, 0.75));
 }

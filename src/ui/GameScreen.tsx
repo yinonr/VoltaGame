@@ -513,6 +513,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
                 state={state}
                 player={viewer}
                 mode={mode === 'integration' ? null : mode}
+                touch
                 onSelect={(t) => {
                   onSelectBuild(t);
                   if (t !== 'card') setSheet(null);

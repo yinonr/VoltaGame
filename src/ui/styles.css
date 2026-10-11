@@ -1654,7 +1654,7 @@ kbd {
   justify-content: center;
   gap: 0;
   height: 44px;
-  padding: 0 7px;
+  padding: 0 6px;
   border-radius: 9px;
   border: 1px solid var(--border);
   border-bottom: 2px solid var(--co);
@@ -1974,6 +1974,19 @@ kbd {
 .sheet-body .panel-head h2 {
   display: none;
 }
+/* The Build sheet stacks three panels: Financing and Full-Stack keep their headings. */
+.sheet-body .panel.financing,
+.sheet-body .panel.fullstack {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+.sheet-body .financing .panel-head h2,
+.sheet-body .fullstack .panel-head h2 {
+  display: block;
+  font-size: 14px;
+}
 .sheet-body .log {
   min-height: 0;
 }
@@ -2094,7 +2107,8 @@ kbd {
     gap: 6px;
   }
   /* Results: the actions stay pinned to the bottom of the dialog while the standings scroll. */
-  .winner-modal .modal-actions {
+  .winner-modal .modal-actions,
+  .intro-modal .modal-actions {
     position: sticky;
     bottom: 0;
     z-index: 2;
