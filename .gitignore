@@ -8,3 +8,6 @@ coverage
 .vite
 playwright-report
 test-results
+
+# Agent worktrees (local only)
+.claude/worktrees/
