@@ -14,7 +14,7 @@ It is a playful abstraction, not a simulation of any real company's products, fi
 
 | Mode | What it is |
 | --- | --- |
-| **New Game** | Name your AI company, meet the three rivals, and pick the rules: **Settlers of Compute** (default: Infrastructure Financing + Full-Stack Integration) or **Classic** (the original Catan-inspired rules). You play against 3 AI companies with a Quick Start opening. |
+| **New Game** | Name your AI company, meet the three rivals, and pick the rules: **Settlers of Compute** (default: Infrastructure Financing + Full-Stack Integration + Grid Stability) or **Classic** (the original Catan-inspired rules). You play against 3 AI companies with a Quick Start opening. |
 | **Custom game** | 2–4 companies in any mix of humans and AI. Humans play local pass-and-play on one device, each with their own company name. Optional manual snake-draft opening, board seed, rules choice and legacy "Special cards (beta)". All-AI games can be spectated. |
 | **Continue** | The current game auto-saves to browser storage. Old saves load as Classic. |
 | **Quick Demo** | A deterministic midgame kept for testing and demos. It's hidden from the menus; open the site with `#demo` to see it. |
@@ -68,6 +68,7 @@ Roll → collect from matching hexes (1 per cluster, 2 per factory) → trade (m
   - connect 4 Network Connections in one network.
 
   Once unlocked, **Integrated Deployment** builds a full AI Factory straight onto an open site for 1 Power + 1 Networking + 1 Land + 3 Capital + 2 GPUs (+2 CP).
+- **Grid Stability.** After a Grid Disruption the next **6 rolls** are calm: a 7 in that window causes no discards, theft or outage move (it still produces nothing). An outage keeps its hex offline for **4 rolls**, then it comes back online. Infrastructure Priority cards can still knock a hex offline at any time.
 
 Full design notes: [`docs/GAME_DESIGN.md`](docs/GAME_DESIGN.md) and [`docs/STRATEGIC_SYSTEMS.md`](docs/STRATEGIC_SYSTEMS.md). Balance evidence: [`docs/BALANCE.md`](docs/BALANCE.md). Project status and next steps: [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
