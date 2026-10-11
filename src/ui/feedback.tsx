@@ -233,6 +233,9 @@ export function notableMoments(before: GameState, after: GameState, viewer: numb
       out.push({ player: p.id, text: 'unlocked Full-Stack Integration', priority: 2 });
     }
   });
+  // Grid Stability: an outage that just expired gets a quiet notice (no dialog, no acknowledgment).
+  const restored = after.log.find((e) => e.kind === 'disruption' && e.id >= before.nextLogId && e.text.startsWith('Grid restored'));
+  if (restored) out.push({ player: null, text: restored.text.replace(/^Grid restored: /, ''), priority: 1 });
   // Market events speak for themselves: show the first new one.
   const event = after.log.find((e) => e.kind === 'event' && e.id >= before.nextLogId);
   if (event) out.push({ player: null, text: event.text, priority: 2 });
@@ -374,7 +377,7 @@ export function FeedbackLayer({
           <div key={n.id} className={`rival-notice${n.priority >= 3 ? ' threat' : ''}`} style={co ? { ['--co' as string]: co.color } : undefined}>
             <i className="rival-notice-mark" aria-hidden="true" />
             <span>
-              <b>{p ? p.name : 'Market'}</b> {n.parts.join(' · ')}
+              <b>{p ? p.name : n.parts[0]?.includes('back online') ? 'Grid restored' : 'Market'}</b> {n.parts.join(' · ')}
             </span>
           </div>
         );

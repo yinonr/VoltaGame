@@ -30,7 +30,7 @@ import {
 } from './modals';
 import { BuildPanel, CardsPanel, CompanyDot, DiceDisplay, EventLog, FlashCount, HandPanel, Scoreboard } from './panels';
 import type { BuildChoice } from './panels';
-import { FinancingPanel, FullStackPanel, sitePips } from './strategy';
+import { FinancingPanel, FullStackPanel, GridStatusBar, sitePips } from './strategy';
 import { BottomSheet, COMPACT_QUERY, useMediaQuery, ZOOM_LEVELS, ZoomableBoard } from './mobile';
 import { FeedbackLayer, GainBubbles } from './feedback';
 import { ResourceIcon } from './icons';
@@ -275,7 +275,9 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
 
   const rollNote =
     state.lastRoll?.total === 7
-      ? 'Grid Disruption — no production.'
+      ? state.lastRoll.stabilized
+        ? 'A 7, but the grid is stabilizing: no disruption.'
+        : 'Grid Disruption — no production.'
       : state.lastProduction && viewer !== null
         ? myGains && sumBundle(myGains) > 0
           ? `You collected ${describeBundle(myGains)}.`
@@ -418,6 +420,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
 
         <div className="m-board">
           <ZoomableBoard zoom={zoom}>{boardEl}</ZoomableBoard>
+          <GridStatusBar state={state} compact />
           <div className="m-zoom">
             <button className="icon-btn" onClick={() => setZoom(ZOOM_LEVELS[Math.max(0, zi - 1)])} disabled={zi <= 0} aria-label="Zoom out">
               −
@@ -643,6 +646,7 @@ export function GameScreen({ ctl, intro, onDismissIntro, onExit, onNewGame, onDe
           </header>
           <DiceDisplay state={state} />
           <p className="roll-note small">{rollNote}</p>
+          <GridStatusBar state={state} />
           {state.lastProduction?.shortages.length ? (
             <p className="small warn">Shortage: {state.lastProduction.shortages.map((r) => RESOURCE_INFO[r].label).join(', ')} ran out at the market.</p>
           ) : null}

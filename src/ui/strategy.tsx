@@ -10,6 +10,7 @@ import {
 } from '../engine/constants';
 import { checkRefinance, financedVertices, refinanceCost } from '../engine/financing';
 import { fullStackProgress } from '../engine/fullstack';
+import { gridStatus } from '../engine/grid';
 import type { GameState } from '../engine/types';
 import { ResourceIcon } from './icons';
 
@@ -130,5 +131,38 @@ export function FullStackPanel({ state, player }: { state: GameState; player: nu
         )}
       </p>
     </section>
+  );
+}
+
+/**
+ * Grid Stability at a glance: whether a natural 7 can disrupt right now, and how long the current
+ * outage lasts. Two small chips, no dialogs. Renders nothing in Classic.
+ */
+export function GridStatusBar({ state, compact = false }: { state: GameState; compact?: boolean }) {
+  const g = gridStatus(state);
+  if (!g.enabled) return null;
+  const rolls = (n: number) => `${n} roll${n === 1 ? '' : 's'}`;
+  const outage = g.outageTile !== null && g.outageRolls > 0 ? state.board.tiles[g.outageTile] : null;
+  return (
+    <div className={`grid-status${compact ? ' compact' : ''}`} role="status" aria-live="polite">
+      {g.vulnerable ? (
+        <span className="grid-chip vulnerable" title="A natural 7 now triggers a Grid Disruption: discards, an outage and a theft.">
+          <i aria-hidden="true" />
+          Grid vulnerable
+        </span>
+      ) : (
+        <span className="grid-chip stable" title={`A 7 in the next ${rolls(g.stableRolls)} causes no disruption.`}>
+          <i aria-hidden="true" />
+          Stabilizing · {rolls(g.stableRolls)}
+        </span>
+      )}
+      {outage && outage.type !== 'barren' && (
+        <span className="grid-chip outage" title={`The ${RESOURCE_INFO[outage.type].label} ${outage.number} hex is offline; it produces again after ${rolls(g.outageRolls)}.`}>
+          <i aria-hidden="true" />
+          Outage · {compact ? '' : `${RESOURCE_INFO[outage.type].label} ${outage.number} · `}
+          {rolls(g.outageRolls)}
+        </span>
+      )}
+    </div>
   );
 }

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { GameState, TileType } from '../engine/types';
 import { BARREN_INFO, RESOURCE_INFO, companyById, pips } from '../engine/constants';
 import { isFinanced, outputMultiplier } from '../engine/financing';
+import { gridStatus } from '../engine/grid';
 import { useFreshBuilds, useRollFlash } from './feedback';
 import { ResourceGlyph } from './icons';
 
@@ -96,6 +97,7 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
   const report = flash?.report ?? null;
   const prodKey = `roll-${flash?.seq ?? 0}`;
   const fresh = useFreshBuilds(state);
+  const grid = gridStatus(state);
 
   return (
     <svg className="board" viewBox={viewBox} role="img" aria-label="Settlers of Compute board">
@@ -130,7 +132,7 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
       {/* backdrop plate */}
       <circle cx={0} cy={0} r={S * 5.4} fill="url(#sea)" />
       <polygon points={hexPoints(0, 0, S * 4.75)} transform="rotate(30)" className="board-plate" />
-      {flash?.roll.total === 7 && <polygon key={`seven-${flash.seq}`} points={hexPoints(0, 0, S * 4.75)} transform="rotate(30)" className="plate-seven" pointerEvents="none" />}
+      {flash?.roll.total === 7 && !flash.roll.stabilized && <polygon key={`seven-${flash.seq}`} points={hexPoints(0, 0, S * 4.75)} transform="rotate(30)" className="plate-seven" pointerEvents="none" />}
 
       {/* ports */}
       {board.ports.map((port) => {
@@ -234,7 +236,9 @@ export function Board({ state, highlightVertices, highlightEdges, highlightTiles
                 <path d="M3 3 L21 21" stroke="#1a0b10" strokeWidth={3.5} strokeLinecap="round" />
               </g>
             </g>
-            <text x={cx} y={cy + 47} textAnchor="middle" className="outage-label">OUTAGE</text>
+            <text x={cx} y={cy + 47} textAnchor="middle" className="outage-label">
+              {grid.enabled && grid.outageRolls > 0 ? `OUTAGE · ${grid.outageRolls}` : 'OUTAGE'}
+            </text>
           </g>
         );
       })()}

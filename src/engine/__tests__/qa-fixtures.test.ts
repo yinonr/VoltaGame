@@ -62,5 +62,11 @@ it.runIf(process.env.QA_GEN)('generate QA states', () => {
   f = { ...f, buildings: fb, longestRoadHolder: null, players: f.players.map((p) => (p.id === 0 ? { ...p, devCards: cards, fullStackTurn: 1 } : p)) };
   f = setHand(f, 0, { capital: 1 });
   writeFileSync(OUT + '/qa-win-compute.json', JSON.stringify(f));
+
+  // G: Grid Stability mid-countdown: an outage on a hex next to the human's financed factory
+  // (2 rolls left) and 4 protected rolls left; human main phase.
+  const outageTile = e.board.vertices[own[0]].tileIds.find((t) => e.board.tiles[t].type !== 'barren')!;
+  const g: GameState = { ...e, disruptionTile: outageTile, grid: { stableRolls: 4, outageRolls: 2 } };
+  writeFileSync(OUT + '/qa-grid.json', JSON.stringify(g));
   console.log('C vp', victoryPoints(c, 0), 'sites', legalClusterVertices(c, 0).length);
 });

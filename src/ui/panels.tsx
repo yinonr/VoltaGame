@@ -238,7 +238,9 @@ export function DiceDisplay({ state }: { state: GameState }) {
   const roll = shown?.roll ?? null;
   const rolling = tumble > 0;
   const stale = !!roll && live === null;
-  const seven = roll?.total === 7;
+  // A 7 is a Grid Disruption unless Grid Stability absorbed it.
+  const seven = roll?.total === 7 && !roll.stabilized;
+  const calm = roll?.total === 7 && !!roll.stabilized;
   const fresh = !!shown && shown.seq > 0 && !stale;
   const face = (d: number, k: number) => (rolling ? ((d + tumble * k) % 6) + 1 : d);
   return (
@@ -262,6 +264,11 @@ export function DiceDisplay({ state }: { state: GameState }) {
       {seven && !rolling && !stale && (
         <span key={shown!.seq} className="dice-alert">
           Grid Disruption
+        </span>
+      )}
+      {calm && !rolling && !stale && (
+        <span key={shown!.seq} className="dice-alert stable">
+          Grid stable · no disruption
         </span>
       )}
     </div>

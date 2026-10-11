@@ -7,6 +7,8 @@ import {
   FINANCING_COMMITMENT,
   FINANCING_COST,
   FINANCING_MAX_OUTSTANDING,
+  GRID_OUTAGE_ROLLS,
+  GRID_STABILITY_ROLLS,
   INTEGRATED_DEPLOYMENT_COST,
   RESOURCE_INFO,
   bundle,
@@ -578,6 +580,11 @@ export function RulesModal({ onClose }: { onClose: () => void }) {
             financed factory scores and produces like a cluster until it has repaid {FINANCING_COMMITMENT} units of its own output (1 each time its hexes produce;
             the outage stalls it). Then it is a full AI Factory: +1 CP and double output. Up to {FINANCING_MAX_OUTSTANDING} at a time. On your turn you can{' '}
             <b>refinance</b>: pay 1 Capital per unit left to finish it at once. Financing buys speed; building debt-free buys certainty.
+          </li>
+          <li>
+            <b>Grid Stability</b>: after a Grid Disruption the grid stabilizes for {GRID_STABILITY_ROLLS} rolls, so a 7 in that window causes no discards,
+            no theft and no outage move (it still produces nothing). An outage keeps its hex offline for the next {GRID_OUTAGE_ROLLS} rolls, then it comes
+            back online. Infrastructure Priority cards still move the outage at any time. Every roll counts, 7s included.
           </li>
           <li>
             <b>Full-Stack Integration</b>: run an operational (fully repaid) AI Factory, hold three sites, touch four resource types and connect four

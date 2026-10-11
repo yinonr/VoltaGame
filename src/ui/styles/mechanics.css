@@ -149,3 +149,59 @@
   margin: 0;
   color: #c4b5fd;
 }
+
+/* Grid Stability: two quiet chips; the stable chip is calm, the outage chip is red. */
+.grid-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+.grid-status.compact {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  margin: 0;
+  justify-content: flex-end;
+  max-width: 62%;
+  z-index: 5;
+  pointer-events: none;
+}
+.grid-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font: 700 10.5px var(--display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: rgba(11, 16, 32, 0.88);
+  border: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+.grid-chip i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.grid-chip.vulnerable {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.5);
+}
+.grid-chip.stable {
+  color: #67e8f9;
+  border-color: rgba(103, 232, 249, 0.45);
+}
+.grid-chip.outage {
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.55);
+}
+.compact .grid-chip {
+  font-size: 9.5px;
+  padding: 2px 7px;
+}
+.dice-alert.stable {
+  color: #67e8f9;
+}
