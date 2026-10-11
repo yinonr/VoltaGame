@@ -19,9 +19,18 @@ It is a playful abstraction, not a simulation of any real company's products, fi
 
 ### Controls
 
+**Desktop:**
+
 - **Roll dice** (`R`), **Trade** (`T`), **End turn** (`E`), `Esc` cancels a placement.
 - Click a build option, then click a glowing corner or edge on the board. Disabled options say why (missing resources, no legal site, wrong phase…).
 - AI speed: **Normal → Fast → Turbo** (top bar).
+
+**Phone (portrait or landscape):**
+
+- The board is the centerpiece. Use the **+ / −** buttons to zoom, then drag with one finger to pan.
+- Tap a glowing spot, then tap **Confirm**; a mis-tap never builds anything.
+- The dock holds the dice and Roll / End turn. Your resources sit underneath.
+- The tab bar opens **Build**, **Trade**, **Cards**, **Activity** and **Market** (scores) as bottom sheets. The **☰** menu has AI speed, rules and new game.
 
 ### Rules at a glance
 
@@ -67,7 +76,9 @@ npm run dev        # http://localhost:5173
 
 The production build uses the base path `/VoltaGame/` (see `vite.config.ts`; override with `VITE_BASE=/ npm run build` for other hosts). It is a fully static site: no backend, accounts, keys or paid APIs.
 
-`.github/workflows/deploy.yml` tests, builds and publishes `dist/` on every push to `main`. One-time setup by a repository admin: **Settings → Pages → Build and deployment → Source: GitHub Actions**. The site will then be served at `https://yinonr.github.io/VoltaGame/`.
+`.github/workflows/deploy.yml` tests, builds and publishes `dist/` on every push to `main`. One-time setup by a repository admin: **Settings → Pages → Build and deployment → Source: GitHub Actions**. Then re-run the latest "Deploy to GitHub Pages" workflow, or push to `main`. The site will be served at `https://yinonr.github.io/VoltaGame/`.
+
+> Status (2026-10-11): `main` is up to date, and the workflow's test and build steps pass on GitHub. Deployment is waiting on that one-time Pages setting; until then the workflow stops at `configure-pages` with "Get Pages site failed".
 
 Any other static host works too: upload the contents of `dist/`.
 
@@ -77,7 +88,7 @@ React 19 + TypeScript + Vite, SVG for the board and pieces, plain CSS, Vitest. T
 
 ## Known limitations
 
-- Desktop-first (designed at 1440px wide). It works at smaller widths but is not optimized for phones.
+- Phone layout is tested in browser emulation (iPhone-sized viewports with touch), not yet on a physical iPhone.
 - Only the active player can trade, one counterparty at a time (no open "ask everyone" offers or counter-offers).
 - Innovation Cards other than Infrastructure Priority can't be played before rolling.
 - Online multiplayer is out of scope for this version.

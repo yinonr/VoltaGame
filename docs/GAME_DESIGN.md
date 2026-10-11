@@ -135,6 +135,27 @@ src/ui/                React + SVG presentation
 - **Determinism.** The RNG state lives inside `GameState`, so a seed plus a list of actions replays a game exactly. That property makes the AI, the demo and the tests reproducible, and it is also the foundation for future online play (send actions, not state).
 - **Hidden information** is a UI concern. The engine is omniscient, but the AI only reads public data, and the UI shows a hand only to its owner. Pass-and-play hides hands behind a "pass the device" screen.
 
+## Touch / mobile layout
+
+`GameScreen` renders one of two layouts from the same state and handlers.
+
+The **touch layout** applies when `(max-width: 820px), (max-height: 520px)` matches (`src/ui/mobile.tsx`):
+
+- **Portrait (from top to bottom):**
+  - player chips with Compute Points; tap a chip to open the Market sheet;
+  - the instruction banner, with Cancel while placing;
+  - the zoomable board, which takes all remaining height;
+  - a dock with the dice, the last roll's result and the primary action (Roll / End turn);
+  - your resource bar;
+  - a tab bar: Build · Trade · Cards · Activity · Market.
+- **Landscape:** the board fills the left side, and the same controls stack in a right-hand column.
+- **Zoom:** fit, 1.5× and 2.2×. The board is drawn larger inside a native scroll container, so one-finger drag pans (with momentum on iOS). `touch-action: pan-x pan-y` disables pinch inside the board so the page never zooms by accident. This was chosen over custom pinch gestures because it is simpler and more reliable.
+- **Tap, then confirm:** on touch, a tap on a highlighted corner, edge or hex only *selects* it, shown with a ghost piece or a red hex. A confirm bar ("Upgrade this cluster to an AI Factory?") commits the move, so a mis-tap or a pan never builds anything.
+- **Hit areas:** the hit areas grow on touch. At fit zoom, corners are about 32px across and edges about 19px thick on a 390px-wide screen; zooming makes them bigger.
+- **Panels become bottom sheets:** the desktop side panels (build menu, cards, activity log, scoreboard, menu) open as bottom sheets that scroll internally. Dialogs fit the screen: steppers reflow, and the results table scrolls sideways. Toasts appear under the banner, and the layout respects iOS safe areas.
+
+The **desktop layout** (three columns) is unchanged.
+
 ## Deliberate abstractions
 
 - No finance, power engineering, rack layout, cooling or project-finance mechanics. Those were explicitly out of scope.

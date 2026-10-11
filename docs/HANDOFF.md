@@ -1,89 +1,134 @@
 # Handoff — Settlers of Compute
 
-_Last updated: 2026-10-11, end of session 1._
+_Last updated: 2026-10-11, end of session 1 (including the mobile + deployment continuation)._
 
 ## Where things are
 
-- **Repository:** https://github.com/yinonr/VoltaGame
-- **Working branch:** `claude/new-session-4osyq1`. All work is pushed here.
-- **`main`:** initialized with the first foundation checkpoint (`92d72d9`). It does **not** yet contain the later work. Merge the working branch (PR or fast-forward) to update `main` and trigger the Pages deploy.
-- **Pushed checkpoints on the working branch:**
+- **Repository:** https://github.com/yinonr/VoltaGame (public)
+- **Working branch:** `claude/new-session-4osyq1`
+- **`main`:** fast-forwarded to the working branch. Both point at the same commit after this docs update; run `git log -1 origin/main` for the exact SHA.
+- **Code checkpoints:**
   - `92d72d9` foundation
   - `2e7d24f` playable core + tests
   - `fc526fa` competitive feel + docs + workflows
-  - `1ac2521` demo + polish (latest code commit)
-  - this docs update, committed right after `1ac2521` (run `git log -1` for its SHA)
-- **CI:** GitHub Actions `CI` passed on `fc526fa` (`npm ci`, `npm test`, `npm run build` on ubuntu-latest).
+  - `1ac2521` demo + polish
+  - `1628285` docs
+  - **`d120891` mobile touch layout** (latest code commit)
+  - a docs commit on top of `d120891`: HANDOFF, MULTIPLAYER_PLAN, README, GAME_DESIGN
+- **CI:** the `CI` workflow passed on branch pushes `fc526fa` and `1ac2521`. On `main` (`d120891`) the deploy workflow passed `npm ci`, `npm test` and `npm run build` on ubuntu-latest.
+
+## Deployment status: blocked on one owner setting
+
+- `.github/workflows/deploy.yml` runs on every push to `main`. Run **38099330606** (commit `d120891`) passed install, tests and build, then failed at `actions/configure-pages@v5` with *"Get Pages site failed… verify that the repository has Pages enabled and configured to build using GitHub Actions"* (HTTP 404). **Pages has never been enabled for this repository**, and the workflow's `GITHUB_TOKEN` is not allowed to enable it.
+- **Manual steps for the repository owner (about 1 minute):**
+  1. Open https://github.com/yinonr/VoltaGame/settings/pages
+  2. Under **Build and deployment → Source**, choose **GitHub Actions**. No branch selection is needed.
+  3. Open https://github.com/yinonr/VoltaGame/actions/workflows/deploy.yml, open the latest run and click **Re-run all jobs**. Pushing any commit to `main` also works.
+  4. When the `deploy` job turns green, the game is live at **https://yinonr.github.io/VoltaGame/**. The job summary shows the URL.
+- **Not verified:** the live URL has never loaded successfully, because deployment hasn't happened yet. This cloud environment also cannot reach `*.github.io` or the Pages API (blocked by egress policy), so verify on your own device after the re-run.
 
 ## Feature status
 
 | Feature | Status |
 | --- | --- |
-| 19-hex seeded fair board, ports, true vertex/edge topology | Done |
-| Quick Start opening (auto snake draft, equity search) | Done |
-| Manual snake-draft opening | Done (Custom game → uncheck Quick Start) |
-| Roll / production / shortage rule | Done |
-| Connections, clusters, factory upgrades, piece limits | Done |
-| Market 4:1, hubs 3:1 / 2:1 | Done |
-| Human → AI offers with reasons; AI → human / AI → AI offers | Done |
-| Grid Disruption: discard, move, steal, blocked hex | Done |
-| Innovation Cards: all five types and restrictions | Done |
-| Longest Network, Priority Access, hidden Breakthroughs | Done |
-| Win detection and winner screen with breakdown | Done |
-| 3 deterministic AI rivals with personalities | Done |
-| Quick Demo deterministic midgame | Done |
-| Local pass-and-play (2–4 seats, any human/AI mix) and all-AI spectate | Done (browser-tested with 2 humans + 1 AI) |
-| Autosave / continue | Done |
-| GitHub Pages workflow | Done in repo; **Pages not yet enabled** (needs repo admin) and `main` not yet updated |
-| Online multiplayer | Not started (out of scope) |
+| Full Catan-style rules engine (board, production, building, trading, Grid Disruption, Innovation Cards, bonuses, win) | Done, 53 tests |
+| 3 deterministic AI rivals, AI→human and AI→AI offers | Done |
+| Quick Start, manual snake draft, Quick Demo (seed 392, four-way race) | Done |
+| Local pass-and-play (2–4 seats, human/AI mix), spectate, autosave | Done |
+| Desktop layout (1280–1920 wide) | Done, unchanged by the mobile work |
+| **Phone layout, portrait + landscape** | **Done**, tested in emulation (see below) |
+| GitHub Pages deploy workflow | Done in repo; **blocked on the owner enabling Pages** |
+| Online multiplayer | **Not started.** Plan in `docs/MULTIPLAYER_PLAN.md` |
 
-## Verification performed (actual results)
+## Mobile functionality completed
 
-- `npm test`: **53 passed**, 1 skipped (the opt-in QA fixture generator), 7 suites.
-- `npm run build` (tsc + vite): passes.
-- Browser automation with headless Chromium (Playwright) against `vite preview`, at 1440×900 unless noted:
-  - Interview path: Quick Demo → offer Ambulo 1 Power for 1 GPU → accepted with a reason → build the AI Factory → end turn. The three AI turns take about 10 s at Normal speed, and two rivals made offers to the human (Accept/Decline dialog). No errors.
-  - Full game: a scripted human against Turbo-speed AI, played to the winner screen (18 human turns, 12 builds, 2 discards, 8 outage moves). No errors.
-  - Layout at 1280×720, 1366×768 and 1920×1080: no page scroll, nothing clipped. The right column scrolls internally for the Innovation Cards list.
-  - Title → Quick Demo → intro → board: rendered, no console errors.
-  - New Game: roll, payouts, disabled build reasons, trade modal (market + rivals), end turn, three AI turns (including an AI–AI trade and an AI 7 with a steal), back to the human. No errors.
-  - Injected states: a human 7 with 9 cards → discard modal → move outage → victim picker → steal logged. Resource Grant modal, the one-card-per-turn block, Network Expansion's two free connections, and a winning cluster build → winner modal. No errors.
-  - Custom game with 2 humans + 1 AI and a manual draft: pass-device screens, legal draft highlights, all eight placements, then turn 1. No errors.
+- **When it applies:** the touch layout appears when `(max-width: 820px), (max-height: 520px)` matches.
+  - In portrait it shows player chips, the instruction banner, the zoomable board, a dock with dice and Roll / End turn, the resource bar, and tabs (Build · Trade · Cards · Activity · Market).
+  - In landscape the board fills the left side and the controls sit in a right column.
+- **Zoom:** fit, 1.5× and 2.2× via **+ / −** buttons, with native one-finger panning. Pinch is disabled inside the board so the page never zooms by accident.
+- **Tap, then confirm:** every placement, plus the Grid Disruption target, is selected first and committed with **Confirm**, so a mis-tap never builds. Touch hit areas are enlarged.
+- **Sheets and dialogs:** sheets scroll internally, dialogs fit the screen (steppers reflow, the results table scrolls sideways), and toasts sit under the banner.
+- **iOS details:** safe-area insets, `100dvh`-style fixed layout, `viewport-fit=cover`, theme color.
 
-## Known issues / rough edges
+## Tests actually performed
 
-- Right column scrolls at 900px height when the player holds several Innovation Cards. That is intended (no clipping), but the cards sit below the fold.
-- Payout chips appear only when a roll produces. Discards and steals are announced in the log and in toasts, with no board animation.
-- AI offers to the human can interrupt the human's spectating between AI turns. At most one per AI turn, by design.
-- The human's opening in Quick Start is chosen automatically (by design for speed). Use Custom → manual draft to pick it yourself.
+- `npm test`: **53 passed**, 1 skipped (the opt-in QA fixture generator).
+- `npm run build` passes locally and on GitHub Actions.
+- Mobile, using Playwright with headless Chromium and `isMobile` + `hasTouch` + an iPhone user agent, every interaction done with `tap()`, at **390×844, 375×667 and 844×390**. Every step passed at all three sizes with no console errors and no page overflow:
+  1. Load the game and start the Quick Demo.
+  2. Inspect the hand; zoom in (the board becomes scrollable) and back out.
+  3. Trade → Rival companies → 1 Power for 1 GPU → Ambulo accepts with a reason; the dialog fits the screen.
+  4. Build → AI Factory → tap a cluster → confirm bar → Confirm → factory built.
+  5. Menu sheet dismissed by tapping the backdrop; Market and Activity sheets open and close.
+  6. End turn → three AI turns run (offers handled by Decline) → back to the human.
+  7. Corner and edge selection with confirm, in the manual opening draft.
+  8. A 7 with 9 cards: discard dialog → tap a hex → confirm ("Knock out GPUs 11? Rivals here: Ambulo.") → steal.
+  9. Pass-and-play: the pass screen appears for the second human.
 
-## Next steps (priority order)
+  One 390×844 run stalled on its final pass-and-play step. That game uses a random board, and the test script didn't handle one random state (likely a discard dialog after a 7). A re-run passed every step.
+- **Full game on a phone viewport:** at 390×844, a scripted player using only touch controls played a full game against Turbo AI to the results screen (18 turns, 35 s), with no errors.
+- **Desktop regression:** at 1440×900 the Quick Demo trade → factory → AI-round path still works with no errors (about 10 s per AI round at Normal speed).
+- **Not done:** testing on a physical iPhone. Emulation does not reproduce real Safari toolbar behavior, momentum feel or exact touch precision.
 
-1. Merge `claude/new-session-4osyq1` into `main`, then enable Pages (Settings → Pages → Source: GitHub Actions) and confirm the deploy workflow publishes `https://yinonr.github.io/VoltaGame/`.
-2. Rehearse the demo once on the actual presenting machine and browser. The demo seed is pinned (392), so the opening position is always the same; later dice are seeded too, so the AI turns replay identically unless you choose differently.
-3. Visual polish: steal/discard animations on the board, a turn-summary card when control returns to the human, sound.
-4. Improve the AI: smarter road targeting toward hubs, counter-offers, stronger use of Market Consolidation.
-5. Add open offers to all rivals at once, and allow the other cards before the roll.
+## Known issues / remaining mobile work
+
+- Not yet verified on a real iPhone. Check:
+  - that the Safari address bar collapsing doesn't hide the tab bar;
+  - that momentum panning feels right at 2.2×;
+  - that corner targets at fit zoom are comfortable. If they aren't, zoom to 1.5× by default when a build mode starts.
+- In the trade dialog on narrow phones, each resource's −/+ buttons stack vertically. They are usable, but the dialog is tall and scrolls.
+- AI rivals send a fair number of trade offers to the human (about 12 in an 18-turn game when you always decline). Each one pops a dialog. Consider rate-limiting offers to humans (for example, at most one per rival every three turns).
+- There is no pinch-to-zoom gesture; zooming is by buttons, by design.
+- The deploy workflow uses `actions/*@v4/v5`, which print Node 20 deprecation warnings. These are harmless; bump the versions when convenient.
+
+## Online multiplayer recommendation (summary)
+
+Use **Cloudflare Workers + one Durable Object per room**:
+
+- The room object imports the existing `src/engine` and is authoritative. It validates every action with `applyAction` and checks that the sender is the acting player (`getActingPlayer`).
+- It keeps the secret state (RNG, deck, rival hands) server-side and sends each player a redacted `viewFor(state, seat)` over WebSockets.
+- It persists state so refreshes and reconnects resume the same seat via a token stored in `localStorage`, and it runs AI seats and timeouts with alarms.
+- The frontend stays on GitHub Pages. Rooms live at `#/room/:id`.
+- It needs a free Cloudflare account plus the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` GitHub secrets.
+- Estimate: about 5–6 h. Full details, alternatives and security notes are in `docs/MULTIPLAYER_PLAN.md`.
+
+## Next steps (for the 9:40 PM session)
+
+1. **Owner:** enable Pages (steps above), re-run the deploy workflow, and open https://yinonr.github.io/VoltaGame/ on an iPhone to check the mobile items listed above.
+2. Fix anything found on the real device. Keep it small: CSS and layout only.
+3. Implement online multiplayer following `docs/MULTIPLAYER_PLAN.md`, in order:
+   1. `viewFor` + leak tests;
+   2. a `server/` Worker + `RoomDO`;
+   3. the client lobby + `useOnlineGame` + reconnect;
+   4. the deploy workflow + a two-browser test.
+
+   The owner must first create a Cloudflare account and add the two GitHub secrets.
+4. Keep local modes (Quick Demo, vs AI, pass-and-play) untouched and green.
 
 ## Commands
 
 ```bash
 npm install
-npm run dev            # http://localhost:5173
+npm run dev            # http://localhost:5173 (open on a phone via your LAN IP with `npm run dev -- --host`)
 npm test               # Vitest engine suite
 npm run build          # tsc -b && vite build → dist/
 npm run preview        # http://localhost:4173/VoltaGame/
 QA_GEN=/tmp/qa npx vitest run qa-fixtures   # write saved-game fixtures for browser QA
 ```
 
-Browser QA tip: in this cloud environment Chromium lives at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. Install `playwright-core@1.56` outside the repo and launch with `executablePath`. Load a fixture with `localStorage.setItem('settlers-of-compute:save:v1', json)`, then click **Continue saved game**.
+Browser QA in this cloud environment:
+
+- Chromium is at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`.
+- Install `playwright-core@1.56` outside the repo and launch it with `executablePath`.
+- For mobile, create the context with `{ viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true }` and use `locator.tap()`. SVG targets need `{ force: true }`.
+- To load a fixture, set `localStorage['settlers-of-compute:save:v1']` and tap **Continue saved game**.
 
 ## Architecture notes and pitfalls
 
-- `applyAction` is the only state transition. Never mutate `GameState` in the UI. Clone in tests via the helpers.
-- The board object is shared between states by reference and treated as immutable.
-- `getActingPlayer` decides who must act: the trade target, players owing a discard, then the current player. The AI loop and the UI both key off it.
-- The Vite `base` is `/VoltaGame/` for `build` **and** `preview`. `vite preview` 404s on assets if that path is missing.
-- Web fonts load non-blocking. If Google Fonts is unreachable, the system-font fallback still renders.
-- Vitest 5 / Vite 8 / plugin-react 6 are pinned together. Upgrading one alone breaks peer dependencies.
-- `pkill -f "vite preview"` inside a compound shell command can kill the shell itself. Run it separately.
+- `applyAction` is the only state transition, and `getActingPlayer` decides who acts. Both the AI loop (`useGame`) and the UI key off it. A future server must use the same pair.
+- `GameScreen` computes all state and handlers once, then renders either the desktop JSX or the touch JSX (`compact`). Both share `boardEl` and `modalsEl`, so put new UI behavior in the shared part.
+- On touch, board taps go through `pending` → confirm. On desktop they act immediately (`doVertex` / `doEdge` / `doTile`).
+- The Vite `base` is `/VoltaGame/` for `build` and `preview`.
+- Vitest 5, Vite 8 and plugin-react 6 are pinned together.
+- `pkill -f "vite preview"` inside a compound shell command can kill the shell itself; run it on its own.
+- This environment cannot reach `*.github.io`, the GitHub Pages API, or a16z. Use GitHub Actions logs (GitHub MCP) to verify deploys.
